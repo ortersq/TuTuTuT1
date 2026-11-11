@@ -1,0 +1,16 @@
+services:
+  binance-quant-lab:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: binance-quant-lab
+    restart: unless-stopped
+    ports:
+      - "80:80"
+    environment:
+      - NODE_ENV=production
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "20m"
+        max-file: "3"

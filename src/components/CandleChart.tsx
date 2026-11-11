@@ -1,0 +1,352 @@
+import React, { useState } from 'react';
+import { Kline, Trade } from '../types/trading';
+import { calculateEMA, calculateSMA, calculateSuperTrend } from '../utils/indicators';
+
+interface CandleChartProps {
+  klines: Kline[];
+  trades: Trade[];
+  symbol: string;
+}
+
+export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol }) => {
+  const [hoverIndex, setHoverIndex] = useState<number | null>(null);
+
+  if (!klines || klines.length === 0) {
+    return (
+      <div className="h-72 flex items-center justify-center text-slate-500 bg-[#111726] rounded-xl border border-slate-800">
+        暂无K线数据
+      </div>
+    );
+  }
+
+  // Display the most recent 120 candles for high visual fidelity and clear candlestick bodies
+  const visibleCount = Math.min(100, klines.length);
+  const startIndex = klines.length - visibleCount;
+  const visibleKlines = klines.slice(startIndex);
+
+  // Filter trades that occurred within this visible window
+  const startTime = visibleKlines[0].timestamp;
+  const endTime = visibleKlines[visibleKlines.length - 1].timestamp;
+  const visibleTrades = trades.filter((t) => t.exitTime >= startTime && t.entryTime <= endTime);
+
+  // Indicators on visible window
+  const closes = klines.map((k) => k.close);
+  const ema200Full = calculateEMA(closes, 200);
+  const stFull = calculateSuperTrend(klines, 10, 3.0);
+  const volFull = klines.map((k) => k.volume);
+  const volSmaFull = calculateSMA(volFull, 20);
+
+  const ema200 = ema200Full.slice(startIndex);
+  const supertrend = stFull.supertrend.slice(startIndex);
+  const stTrend = stFull.trend.slice(startIndex);
+  const volSma = volSmaFull.slice(startIndex);
+
+  // Scales
+  let minPrice = Infinity;
+  let maxPrice = -Infinity;
+  let maxVol = 0;
+
+  for (const k of visibleKlines) {
+    if (k.low < minPrice) minPrice = k.low;
+    if (k.high > maxPrice) maxPrice = k.high;
+    if (k.volume > maxVol) maxVol = k.volume;
+  }
+
+  const pPadding = (maxPrice - minPrice) * 0.06 || 50;
+  const yMin = minPrice - pPadding;
+  const yMax = maxPrice + pPadding;
+  const yRange = yMax - yMin || 1;
+
+  const width = 900;
+  const height = 300;
+  const volHeight = 55;
+  const margin = { top: 20, right: 65, bottom: 25, left: 20 };
+
+  const plotWidth = width - margin.left - margin.right;
+  const plotHeight = height - margin.top - margin.bottom - volHeight;
+
+  const getX = (idx: number) => margin.left + ((idx + 0.5) / visibleKlines.length) * plotWidth;
+  const getY = (val: number) => margin.top + plotHeight - ((val - yMin) / yRange) * plotHeight;
+  const getVolY = (vol: number) => {
+    const scale = maxVol > 0 ? vol / maxVol : 0;
+    return margin.top + plotHeight + 10 + (1 - scale) * volHeight;
+  };
+
+  const candleWidth = Math.max(2, (plotWidth / visibleKlines.length) * 0.68);
+
+  const hoveredBar = hoverIndex !== null ? visibleKlines[hoverIndex] : visibleKlines[visibleKlines.length - 1];
+
+  return (
+    <div className="bg-[#111726] border border-slate-800/90 rounded-xl p-4.5 mb-5">
+      {/* Header with real-time OHLCV Bar HUD */}
+      <div className="flex flex-wrap items-center justify-between gap-4 mb-2 text-xs">
+        <div className="flex items-center gap-2">
+          <span className="text-sm font-semibold text-slate-200">
+            {symbol} 合约K线与交易信号点位 (Candlesticks & Trade Markers)
+          </span>
+          <span className="text-slate-500 font-mono">
+            {new Date(hoveredBar.timestamp).toLocaleString()}
+          </span>
+        </div>
+
+        {/* OHLCV Bar Details */}
+        <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
+          <span>O: <strong className="text-slate-200 tabular-nums">{hoveredBar.open}</strong></span>
+          <span>H: <strong className="text-emerald-400 tabular-nums">{hoveredBar.high}</strong></span>
+          <span>L: <strong className="text-rose-400 tabular-nums">{hoveredBar.low}</strong></span>
+          <span>C: <strong className={hoveredBar.close >= hoveredBar.open ? 'text-emerald-400 tabular-nums' : 'text-rose-400 tabular-nums'}>{hoveredBar.close}</strong></span>
+          <span>Vol: <strong className="text-amber-400 tabular-nums">{Math.round(hoveredBar.volume)}</strong></span>
+        </div>
+      </div>
+
+      {/* SVG Canvas */}
+      <div className="relative w-full overflow-hidden">
+        <svg
+          viewBox={`0 0 ${width} ${height}`}
+          className="w-full h-auto select-none font-mono"
+          onMouseMove={(e) => {
+            const rect = e.currentTarget.getBoundingClientRect();
+            const relX = ((e.clientX - rect.left) / rect.width) * width;
+            const clampedX = Math.max(margin.left, Math.min(width - margin.right, relX));
+            const idx = Math.floor(((clampedX - margin.left) / plotWidth) * visibleKlines.length);
+            setHoverIndex(Math.max(0, Math.min(visibleKlines.length - 1, idx)));
+          }}
+          onMouseLeave={() => setHoverIndex(null)}
+        >
+          {/* Price grid lines */}
+          {[0, 0.25, 0.5, 0.75, 1].map((pct, idx) => {
+            const y = margin.top + plotHeight * pct;
+            const priceVal = yMax - pct * yRange;
+            return (
+              <g key={idx}>
+                <line
+                  x1={margin.left}
+                  y1={y}
+                  x2={width - margin.right}
+                  y2={y}
+                  stroke="#1e293b"
+                  strokeDasharray="2 2"
+                />
+                <text
+                  x={width - margin.right + 8}
+                  y={y + 3.5}
+                  fontSize="10"
+                  fill="#64748b"
+                >
+                  {priceVal.toFixed(1)}
+                </text>
+              </g>
+            );
+          })}
+
+          {/* Volume separator */}
+          <line
+            x1={margin.left}
+            y1={margin.top + plotHeight + 10}
+            x2={width - margin.right}
+            y2={margin.top + plotHeight + 10}
+            stroke="#1e293b"
+          />
+
+          {/* Candlesticks & Volume Bars */}
+          {visibleKlines.map((k, idx) => {
+            const x = getX(idx);
+            const isBull = k.close >= k.open;
+            const color = isBull ? '#10b981' : '#f43f5e';
+
+            const yHigh = getY(k.high);
+            const yLow = getY(k.low);
+            const yOpen = getY(k.open);
+            const yClose = getY(k.close);
+            const bodyTop = Math.min(yOpen, yClose);
+            const bodyHeight = Math.max(1.5, Math.abs(yClose - yOpen));
+
+            const volY = getVolY(k.volume);
+            const volH = margin.top + plotHeight + 10 + volHeight - volY;
+
+            return (
+              <g key={k.timestamp}>
+                {/* Volume Bar */}
+                <rect
+                  x={x - candleWidth / 2}
+                  y={volY}
+                  width={candleWidth}
+                  height={volH}
+                  fill={isBull ? '#065f46' : '#881337'}
+                  opacity={0.65}
+                />
+
+                {/* Candle Wick */}
+                <line
+                  x1={x}
+                  y1={yHigh}
+                  x2={x}
+                  y2={yLow}
+                  stroke={color}
+                  strokeWidth={1}
+                />
+
+                {/* Candle Body */}
+                <rect
+                  x={x - candleWidth / 2}
+                  y={bodyTop}
+                  width={candleWidth}
+                  height={bodyHeight}
+                  fill={color}
+                  rx={0.5}
+                />
+              </g>
+            );
+          })}
+
+          {/* SuperTrend Overlay Line */}
+          {visibleKlines.map((_, idx) => {
+            if (idx === 0) return null;
+            const prevSt = supertrend[idx - 1];
+            const curSt = supertrend[idx];
+            if (prevSt === null || curSt === null) return null;
+
+            const x1 = getX(idx - 1);
+            const y1 = getY(prevSt);
+            const x2 = getX(idx);
+            const y2 = getY(curSt);
+            const dir = stTrend[idx];
+
+            return (
+              <line
+                key={`st_${idx}`}
+                x1={x1}
+                y1={y1}
+                x2={x2}
+                y2={y2}
+                stroke={dir === 1 ? '#34d399' : '#f87171'}
+                strokeWidth={1.5}
+                strokeDasharray="3 2"
+              />
+            );
+          })}
+
+          {/* Trade Execution Markers */}
+          {visibleTrades.map((t) => {
+            // Find bar index for entry
+            const entryBarIdx = visibleKlines.findIndex(
+              (k, i) =>
+                t.entryTime >= k.timestamp &&
+                (i === visibleKlines.length - 1 || t.entryTime < visibleKlines[i + 1].timestamp)
+            );
+
+            // Find bar index for exit
+            const exitBarIdx = visibleKlines.findIndex(
+              (k, i) =>
+                t.exitTime >= k.timestamp &&
+                (i === visibleKlines.length - 1 || t.exitTime < visibleKlines[i + 1].timestamp)
+            );
+
+            const isLong = t.side === 'LONG';
+
+            return (
+              <g key={t.id}>
+                {/* Entry Marker */}
+                {entryBarIdx >= 0 && (
+                  <g transform={`translate(${getX(entryBarIdx)}, ${getY(t.entryPrice)})`}>
+                    <polygon
+                      points={isLong ? '0,-12 -6,0 6,0' : '0,12 -6,0 6,0'}
+                      fill={isLong ? '#10b981' : '#f43f5e'}
+                      stroke="#0f172a"
+                      strokeWidth={1}
+                    />
+                    <text
+                      x="0"
+                      y={isLong ? -16 : 22}
+                      fontSize="9"
+                      fontWeight="bold"
+                      textAnchor="middle"
+                      fill={isLong ? '#34d399' : '#fb7185'}
+                    >
+                      {isLong ? '做多' : '做空'}
+                    </text>
+                  </g>
+                )}
+
+                {/* Exit Marker */}
+                {exitBarIdx >= 0 && (
+                  <g transform={`translate(${getX(exitBarIdx)}, ${getY(t.exitPrice)})`}>
+                    <circle
+                      cx="0"
+                      cy="0"
+                      r="4.5"
+                      fill={t.netPnl >= 0 ? '#10b981' : '#ef4444'}
+                      stroke="#ffffff"
+                      strokeWidth={1.5}
+                    />
+                    <text
+                      x="0"
+                      y={t.netPnl >= 0 ? -9 : 14}
+                      fontSize="8"
+                      fontWeight="bold"
+                      textAnchor="middle"
+                      fill={t.netPnl >= 0 ? '#6ee7b7' : '#fca5a5'}
+                    >
+                      {t.exitReason === 'TAKE_PROFIT'
+                        ? '止盈'
+                        : t.exitReason === 'STOP_LOSS'
+                        ? '止损'
+                        : t.exitReason === 'TRAILING_STOP'
+                        ? '移动止盈'
+                        : '平仓'}
+                    </text>
+                  </g>
+                )}
+              </g>
+            );
+          })}
+
+          {/* Hover Crosshair */}
+          {hoverIndex !== null && (
+            <g>
+              <line
+                x1={getX(hoverIndex)}
+                y1={margin.top}
+                x2={getX(hoverIndex)}
+                y2={height - margin.bottom}
+                stroke="#94a3b8"
+                strokeWidth={1}
+                strokeDasharray="2 2"
+              />
+              <line
+                x1={margin.left}
+                y1={getY(hoveredBar.close)}
+                x2={width - margin.right}
+                y2={getY(hoveredBar.close)}
+                stroke="#94a3b8"
+                strokeWidth={1}
+                strokeDasharray="2 2"
+              />
+            </g>
+          )}
+        </svg>
+      </div>
+
+      {/* Legend Footer */}
+      <div className="flex flex-wrap items-center justify-between gap-4 mt-3 pt-2.5 border-t border-slate-800/60 text-xs text-slate-400">
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 bg-emerald-500 rounded-sm" />
+            <span>做多开仓 / 盈利平仓</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-2.5 h-2.5 bg-rose-500 rounded-sm" />
+            <span>做空开仓 / 止损平仓</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-0.5 bg-emerald-400 border-dashed" />
+            <span>SuperTrend 动态支撑阻力</span>
+          </div>
+        </div>
+        <div className="text-slate-500">
+          图表展示最近 {visibleCount} 根 K 线完整交易信号映射
+        </div>
+      </div>
+    </div>
+  );
+};

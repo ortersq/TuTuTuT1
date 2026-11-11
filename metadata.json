@@ -1,0 +1,6 @@
+{
+  "name": "Binance Futures Quant Lab",
+  "description": "币安合约多合一量化策略回测系统，整合经典CTA突破、均值回归、SuperTrend趋势追踪与自适应多策略引擎，支持拉取币安真实历史行情进行专业全回测与代码导出。",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
