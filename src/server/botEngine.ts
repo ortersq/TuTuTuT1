@@ -1,12 +1,15 @@
 /**
  * Autonomous Multi-Symbol & Multi-Timeframe Chart Pattern Trading Engine
- * - Monitored Mainstream Pairs: BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT
+ * - Dynamic Monitored Pairs (User can add/delete symbols on the fly)
  * - Monitored Strategy Intervals: 5m, 15m, 30m
- * - Direct Binance Futures API (fapi.binance.com) HMAC-SHA256 order execution when BINANCE_API_KEY is in .env
- * - Paper Trading / Observation Mode when no API Key is provided (records paper PnL)
+ * - UI & .env Direct Binance Futures API Credentials Configuration
+ * - Categorized System Logs Console (Reverse Chronological Order)
+ * - Paper Trading / Observation Mode when no API Key is provided
  */
 
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 import dotenv from 'dotenv';
 import {
   BacktestConfig,
@@ -80,6 +83,16 @@ export interface SymbolScanResult {
   lastScanTime: number;
 }
 
+export interface LogEntry {
+  id: string;
+  time: string;
+  timestamp: number;
+  level: 'info' | 'warn' | 'success' | 'error';
+  category: 'SYSTEM' | 'ORDER' | 'SIGNAL' | 'API';
+  message: string;
+  symbol?: string;
+}
+
 export interface BotStatus {
   isRunning: boolean;
   mode: 'PAPER' | 'LIVE';
@@ -95,7 +108,7 @@ export interface BotStatus {
   activePositions: ActivePosition[];
   closedTrades: BotTradeRecord[];
   scanResults: SymbolScanResult[];
-  logs: { time: string; level: 'info' | 'warn' | 'success' | 'error'; message: string }[];
+  logs: LogEntry[];
   lastUpdateTime: number;
   riskConfig: RiskManagementConfig;
 }
@@ -106,6 +119,9 @@ class TradingEngine {
   private monitoredSymbols: string[] = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
   private monitoredTimeframes: string[] = ['5m', '15m', '30m'];
 
+  private apiKey: string = process.env.BINANCE_API_KEY?.trim() || '';
+  private apiSecret: string = process.env.BINANCE_API_SECRET?.trim() || '';
+
   private balance: number = 10000;
   private equity: number = 10000;
   private peakEquity: number = 10000;
@@ -114,7 +130,7 @@ class TradingEngine {
   private activePositions: ActivePosition[] = [];
   private closedTrades: BotTradeRecord[] = [];
   private scanResults: SymbolScanResult[] = [];
-  private logs: { time: string; level: 'info' | 'warn' | 'success' | 'error'; message: string }[] = [];
+  private logs: LogEntry[] = [];
   private lastUpdateTime: number = Date.now();
 
   private riskConfig: RiskManagementConfig = {
@@ -143,18 +159,75 @@ class TradingEngine {
     this.mode = hasKeys ? 'LIVE' : 'PAPER';
     this.addLog(
       'info',
-      `多币种 (BTC/ETH/SOL/BNB) 5m/15m/30m 形态监控引擎就绪 | 运行模式: ${
+      'SYSTEM',
+      `多币种 5m/15m/30m 动态量化引擎就绪 | 运行模式: ${
         hasKeys
-          ? '🟢 币安实盘 API 模式 (已读取 .env 密钥)'
-          : '🔵 模拟观察模式 (无 API Key，自动记录模拟持仓与损益)'
+          ? '🟢 币安实盘 API 模式 (已验证 API Key)'
+          : '🔵 模拟观察模式 (无 API Key，只自动模拟开平仓并记录损益)'
       }`
     );
   }
 
   public hasApiCredentials(): boolean {
-    const key = process.env.BINANCE_API_KEY?.trim();
-    const secret = process.env.BINANCE_API_SECRET?.trim();
-    return Boolean(key && secret && key !== 'MY_BINANCE_API_KEY');
+    return Boolean(
+      this.apiKey &&
+        this.apiSecret &&
+        this.apiKey !== 'MY_BINANCE_API_KEY' &&
+        this.apiKey.length > 10
+    );
+  }
+
+  public setCredentials(key: string, secret: string) {
+    this.apiKey = key.trim();
+    this.apiSecret = secret.trim();
+    const hasKeys = this.hasApiCredentials();
+    this.mode = hasKeys ? 'LIVE' : 'PAPER';
+
+    // Persist to .env file
+    try {
+      const envPath = path.resolve(process.cwd(), '.env');
+      let envContent = '';
+      if (fs.existsSync(envPath)) {
+        envContent = fs.readFileSync(envPath, 'utf8');
+      }
+      envContent = envContent.replace(/^BINANCE_API_KEY=.*$/m, '');
+      envContent = envContent.replace(/^BINANCE_API_SECRET=.*$/m, '');
+      envContent += `\nBINANCE_API_KEY=${this.apiKey}\nBINANCE_API_SECRET=${this.apiSecret}\n`;
+      fs.writeFileSync(envPath, envContent.trim() + '\n', 'utf8');
+    } catch {
+      // ignore
+    }
+
+    this.addLog(
+      hasKeys ? 'success' : 'warn',
+      'API',
+      hasKeys
+        ? '✓ 币安 API Key 更新成功，已切换至 🟢 实盘自动下单模式'
+        : '⚠️ 币安 API Key 已清除，已切换至 🔵 模拟观察模式'
+    );
+  }
+
+  public addSymbol(rawSymbol: string): boolean {
+    const sym = rawSymbol.trim().toUpperCase();
+    const formatted = sym.endsWith('USDT') ? sym : `${sym}USDT`;
+    if (!this.monitoredSymbols.includes(formatted)) {
+      this.monitoredSymbols.push(formatted);
+      this.addLog('info', 'SYSTEM', `➕ 动态添加监控币种: ${formatted}`);
+      return true;
+    }
+    return false;
+  }
+
+  public removeSymbol(rawSymbol: string): boolean {
+    const sym = rawSymbol.trim().toUpperCase();
+    const formatted = sym.endsWith('USDT') ? sym : `${sym}USDT`;
+    if (this.monitoredSymbols.includes(formatted)) {
+      this.monitoredSymbols = this.monitoredSymbols.filter((s) => s !== formatted);
+      this.scanResults = this.scanResults.filter((s) => s.symbol !== formatted);
+      this.addLog('warn', 'SYSTEM', `➖ 移除监控币种: ${formatted}`);
+      return true;
+    }
+    return false;
   }
 
   private getFuturesBaseUrl(): string {
@@ -164,8 +237,7 @@ class TradingEngine {
   }
 
   private signQuery(queryString: string): string {
-    const secret = process.env.BINANCE_API_SECRET?.trim() || '';
-    return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
+    return crypto.createHmac('sha256', this.apiSecret).update(queryString).digest('hex');
   }
 
   private async syncBinanceFuturesBalance(): Promise<void> {
@@ -175,7 +247,7 @@ class TradingEngine {
       const qs = `timestamp=${timestamp}&recvWindow=5000`;
       const sig = this.signQuery(qs);
       const res = await fetch(`${this.getFuturesBaseUrl()}/fapi/v2/balance?${qs}&signature=${sig}`, {
-        headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY!.trim() },
+        headers: { 'X-MBX-APIKEY': this.apiKey },
       });
       if (!res.ok) return;
       const balances: any[] = await res.json();
@@ -185,7 +257,7 @@ class TradingEngine {
         this.equity = parseFloat(usdt.balance || usdt.availableBalance);
       }
     } catch (err: any) {
-      this.addLog('warn', `同步币安合约账户余额异常: ${err.message}`);
+      this.addLog('warn', 'API', `同步币安合约账户余额异常: ${err.message}`);
     }
   }
 
@@ -197,7 +269,7 @@ class TradingEngine {
       const sig = this.signQuery(qs);
       await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/leverage?${qs}&signature=${sig}`, {
         method: 'POST',
-        headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY!.trim() },
+        headers: { 'X-MBX-APIKEY': this.apiKey },
       });
     } catch {
       // ignore
@@ -211,7 +283,7 @@ class TradingEngine {
     reduceOnly: boolean = false
   ): Promise<{ orderId: string } | null> {
     if (!this.hasApiCredentials()) {
-      throw new Error('未配置 BINANCE_API_KEY，切换为模拟记录模式');
+      throw new Error('未配置 BINANCE_API_KEY');
     }
 
     const precision = symbol.startsWith('BTC') || symbol.startsWith('ETH') ? 3 : 1;
@@ -228,7 +300,7 @@ class TradingEngine {
 
     const res = await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/order?${qs}&signature=${sig}`, {
       method: 'POST',
-      headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY!.trim() },
+      headers: { 'X-MBX-APIKEY': this.apiKey },
     });
 
     const data = await res.json();
@@ -256,7 +328,7 @@ class TradingEngine {
       activePositions: this.activePositions,
       closedTrades: this.closedTrades.slice(-50),
       scanResults: this.scanResults,
-      logs: this.logs.slice(-60),
+      logs: [...this.logs], // return array (newest first)
       lastUpdateTime: this.lastUpdateTime,
       riskConfig: this.riskConfig,
     };
@@ -270,6 +342,7 @@ class TradingEngine {
 
     this.addLog(
       'success',
+      'SYSTEM',
       `▶ 启动全自动监控服务 | 监控币种: ${this.monitoredSymbols.join(', ')} | 监控周期: ${this.monitoredTimeframes.join(', ')} | 模式: ${
         hasKeys ? '🟢 币安实盘 API 下单' : '🔵 模拟盘观察记录'
       }`
@@ -286,7 +359,7 @@ class TradingEngine {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.addLog('warn', '⏸ 多币种监控已暂停');
+    this.addLog('warn', 'SYSTEM', '⏸ 多币种监控已暂停');
   }
 
   public updateConfig(newConfig: {
@@ -310,6 +383,7 @@ class TradingEngine {
     }
     this.addLog(
       'info',
+      'SYSTEM',
       `监控配置已更新 | 币种: ${this.monitoredSymbols.join(', ')} | 周期: ${this.monitoredTimeframes.join(', ')} | 杠杆: ${this.leverage}x`
     );
   }
@@ -321,14 +395,29 @@ class TradingEngine {
 
     for (const pos of positionsToClose) {
       await this.closePosition(pos, pos.currentPrice, reason);
-      this.addLog('warn', `⚠️ 平仓完成: [${pos.symbol} ${pos.interval}] ${pos.side} @ ${pos.currentPrice} USDT`);
+      this.addLog('warn', 'ORDER', `⚠️ 平仓完成: [${pos.symbol} ${pos.interval}] ${pos.side} @ ${pos.currentPrice} USDT`, pos.symbol);
     }
   }
 
-  private addLog(level: 'info' | 'warn' | 'success' | 'error', message: string) {
+  private addLog(
+    level: 'info' | 'warn' | 'success' | 'error',
+    category: 'SYSTEM' | 'ORDER' | 'SIGNAL' | 'API',
+    message: string,
+    symbol?: string
+  ) {
     const timeStr = new Date().toLocaleTimeString();
-    this.logs.push({ time: timeStr, level, message });
-    if (this.logs.length > 200) this.logs.shift();
+    const entry: LogEntry = {
+      id: `log_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+      time: timeStr,
+      timestamp: Date.now(),
+      level,
+      category,
+      message,
+      symbol,
+    };
+    // Reverse chronological order: prepend to front
+    this.logs.unshift(entry);
+    if (this.logs.length > 500) this.logs.pop();
   }
 
   private async executeCycle() {
@@ -346,9 +435,7 @@ class TradingEngine {
 
       const updatedScans: SymbolScanResult[] = [];
 
-      // Loop through each monitored symbol (e.g. BTCUSDT, ETHUSDT, SOLUSDT, BNBUSDT)
       for (const symbol of this.monitoredSymbols) {
-        // Loop through strictly 5m, 15m, 30m intervals
         for (const interval of this.monitoredTimeframes) {
           try {
             const fetchResult = await fetchBinanceKlines({
@@ -367,7 +454,6 @@ class TradingEngine {
             const currentAtr =
               calculateATR(klines, 14)[klines.length - 1] ?? (latestBar.high - latestBar.low);
 
-            // Generate Price Action / Chart Pattern Signals
             const { signals, patternMap } = generateAllSignals(
               klines,
               this.params,
@@ -393,7 +479,15 @@ class TradingEngine {
               lastScanTime: Date.now(),
             });
 
-            // Update mark price for active position on this symbol
+            if (latestSig !== 0 && matchedPattern) {
+              this.addLog(
+                'info',
+                'SIGNAL',
+                `⚡ 触发形态信号: [${symbol} ${interval}] ${matchedPattern.name} (动作: ${matchedPattern.action}, 质量: ${matchedPattern.qualityScore})`,
+                symbol
+              );
+            }
+
             const activePosIndex = this.activePositions.findIndex((p) => p.symbol === symbol);
             if (activePosIndex >= 0) {
               const pos = this.activePositions[activePosIndex];
@@ -412,7 +506,6 @@ class TradingEngine {
                 pos.trailingPeakPrice = currentPrice;
               }
 
-              // Evaluate SL / TP / Liquidation
               let exitTriggered: ExitReason | null = null;
               if (pos.side === 'LONG' && currentPrice <= pos.liquidationPrice) {
                 exitTriggered = 'LIQUIDATION';
@@ -426,7 +519,6 @@ class TradingEngine {
                 else if (pos.side === 'SHORT' && currentPrice <= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
               }
 
-              // Trailing stop
               if (!exitTriggered && this.riskConfig.useTrailingStop && this.riskConfig.trailingCallbackPercent > 0) {
                 const cb = this.riskConfig.trailingCallbackPercent / 100;
                 if (pos.side === 'LONG') {
@@ -445,27 +537,29 @@ class TradingEngine {
               if (exitTriggered) {
                 this.addLog(
                   exitTriggered === 'TAKE_PROFIT' || exitTriggered === 'TRAILING_STOP' ? 'success' : 'warn',
-                  `🎯 [${symbol} ${pos.interval}] 触发平仓条件: ${exitTriggered} @ ${currentPrice} USDT`
+                  'ORDER',
+                  `🎯 [${symbol} ${pos.interval}] 触发平仓条件: ${exitTriggered} @ ${currentPrice} USDT`,
+                  symbol
                 );
                 await this.closePosition(pos, currentPrice, exitTriggered);
                 continue;
               }
 
-              // Reversal Signal
               if (
                 (pos.side === 'LONG' && latestSig === -1) ||
                 (pos.side === 'SHORT' && latestSig === 1)
               ) {
                 this.addLog(
                   'info',
-                  `🔄 [${symbol}] 收到反向信号【${matchedPattern?.name ?? '反向形态'}】，平仓当前持仓`
+                  'ORDER',
+                  `🔄 [${symbol}] 收到反向信号【${matchedPattern?.name ?? '反向形态'}】，平仓当前持仓`,
+                  symbol
                 );
                 await this.closePosition(pos, currentPrice, 'SIGNAL_REVERSAL');
                 continue;
               }
             }
 
-            // Auto Open Position if flat for this symbol and signal triggered
             if (activePosIndex < 0 && latestSig !== 0 && this.balance > 50) {
               const side: 'LONG' | 'SHORT' = latestSig === 1 ? 'LONG' : 'SHORT';
               const baseLeverage = this.leverage;
@@ -553,12 +647,14 @@ class TradingEngine {
 
                 this.addLog(
                   'success',
-                  `🚀 [${hasKeys ? '实盘开单' : '模拟观察记录'}] ${symbol} (${interval}) 识别到【${patternTitle}】-> ${side} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}${binanceOrderId ? `，订单 #${binanceOrderId}` : ''})`
+                  'ORDER',
+                  `🚀 [${hasKeys ? '实盘开单' : '模拟观察记录'}] ${symbol} (${interval}) 识别到【${patternTitle}】-> ${side} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}${binanceOrderId ? `，订单 #${binanceOrderId}` : ''})`,
+                  symbol
                 );
               }
             }
           } catch {
-            // Ignore temporary pair fetch timeouts
+            // ignore
           }
         }
       }
@@ -572,7 +668,7 @@ class TradingEngine {
       this.equity = Math.max(0, this.balance + totalUnrealizedPnl);
       if (this.equity > this.peakEquity) this.peakEquity = this.equity;
     } catch (err: any) {
-      this.addLog('error', `监控循环处理异常: ${err.message || '网络连接中断'}`);
+      this.addLog('error', 'SYSTEM', `监控循环处理异常: ${err.message || '网络连接中断'}`);
     } finally {
       this.isProcessing = false;
     }
@@ -588,7 +684,7 @@ class TradingEngine {
           true
         );
       } catch (err: any) {
-        this.addLog('error', `币安实盘平仓请求异常: ${err.message}`);
+        this.addLog('error', 'API', `币安实盘平仓请求异常: ${err.message}`, pos.symbol);
       }
     }
 
@@ -635,7 +731,9 @@ class TradingEngine {
 
     this.addLog(
       netPnl >= 0 ? 'success' : 'warn',
-      `✔ [${pos.symbol} ${pos.interval}] ${pos.isPaper ? '模拟' : '实盘'}平仓: ${pos.side} @ ${exitPrice} USDT | 原因: ${exitReason} | 净损益: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
+      'ORDER',
+      `✔ [${pos.symbol} ${pos.interval}] ${pos.isPaper ? '模拟' : '实盘'}平仓: ${pos.side} @ ${exitPrice} USDT | 原因: ${exitReason} | 净损益: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`,
+      pos.symbol
     );
   }
 }

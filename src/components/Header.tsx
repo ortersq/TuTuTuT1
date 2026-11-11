@@ -1,7 +1,7 @@
 import React from 'react';
-import { Activity, Shield, ListOrdered, Play, Pause, Key } from 'lucide-react';
+import { Activity, Shield, ListOrdered, Terminal, Play, Pause, Key, LogOut } from 'lucide-react';
 
-export type ActiveTab = 'monitor' | 'positions' | 'settings';
+export type ActiveTab = 'monitor' | 'positions' | 'logs' | 'settings';
 
 interface HeaderProps {
   activeTab: ActiveTab;
@@ -10,6 +10,7 @@ interface HeaderProps {
   hasBinanceKeys: boolean;
   onToggleBot: () => void;
   activePositionsCount: number;
+  onLogout: () => void;
 }
 
 export const Header: React.FC<HeaderProps> = ({
@@ -19,6 +20,7 @@ export const Header: React.FC<HeaderProps> = ({
   hasBinanceKeys,
   onToggleBot,
   activePositionsCount,
+  onLogout,
 }) => {
   return (
     <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-[#0e131f] border-b border-slate-800 shrink-0">
@@ -29,10 +31,10 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
         <div>
           <a href="/" className="text-base font-bold tracking-tight text-white whitespace-nowrap block">
-            币安合约 · 多币种 5m/15m/30m 自动量化
+            币安合约 · 多币种 5m/15m/30m 自动量化系统
           </a>
           <div className="text-[11px] text-slate-400 flex items-center gap-2 mt-0.5">
-            <span>BTC · ETH · SOL · BNB</span>
+            <span>动态币种监控</span>
             <span>·</span>
             {hasBinanceKeys ? (
               <span className="text-emerald-400 flex items-center gap-1 font-medium">
@@ -80,6 +82,18 @@ export const Header: React.FC<HeaderProps> = ({
         </button>
 
         <button
+          onClick={() => setActiveTab('logs')}
+          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap py-1 cursor-pointer ${
+            activeTab === 'logs'
+              ? 'text-amber-400 font-semibold border-b-2 border-amber-400'
+              : 'hover:text-slate-200'
+          }`}
+        >
+          <Terminal className="w-3.5 h-3.5" />
+          <span>系统核心日志</span>
+        </button>
+
+        <button
           onClick={() => setActiveTab('settings')}
           className={`flex items-center gap-1.5 transition-colors whitespace-nowrap py-1 cursor-pointer ${
             activeTab === 'settings'
@@ -88,11 +102,11 @@ export const Header: React.FC<HeaderProps> = ({
           }`}
         >
           <Shield className="w-3.5 h-3.5" />
-          <span>监控与 API 配置</span>
+          <span>动态币种 & API 配置</span>
         </button>
       </nav>
 
-      {/* Zone 3: Primary Action */}
+      {/* Zone 3: Primary Action & Logout */}
       <div className="flex items-center gap-3 shrink-0">
         <button
           onClick={onToggleBot}
@@ -113,6 +127,14 @@ export const Header: React.FC<HeaderProps> = ({
               <span>▶ 启动多币种自动监控</span>
             </>
           )}
+        </button>
+
+        <button
+          onClick={onLogout}
+          title="退出控制台"
+          className="p-2 text-slate-400 hover:text-rose-400 hover:bg-slate-800 rounded-lg transition-colors cursor-pointer"
+        >
+          <LogOut className="w-4 h-4" />
         </button>
       </div>
     </header>
