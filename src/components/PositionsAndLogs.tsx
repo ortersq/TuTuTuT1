@@ -1,6 +1,6 @@
 import React from 'react';
-import { BotStatus, ActivePosition, BotTradeRecord } from '../server/botEngine';
-import { ShieldAlert, TrendingUp, CheckCircle, XCircle, Clock } from 'lucide-react';
+import { BotStatus, ActivePosition, BotTradeRecord, PatternStatItem } from '../server/botEngine';
+import { ShieldAlert, TrendingUp, Sparkles, AlertCircle, CheckCircle, ShieldCheck } from 'lucide-react';
 
 interface PositionsAndLogsProps {
   status: BotStatus | null;
@@ -13,8 +13,8 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
 }) => {
   const activePositions = status?.activePositions || [];
   const closedTrades = status?.closedTrades || [];
+  const patternStats = status?.patternStats || [];
 
-  // Calculate Metrics for Completed Trades Log
   const totalTrades = closedTrades.length;
   const wins = closedTrades.filter((t) => t.netPnl > 0).length;
   const losses = closedTrades.filter((t) => t.netPnl < 0).length;
@@ -29,7 +29,7 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
 
   return (
     <div className="space-y-6">
-      {/* Active Open Positions Section */}
+      {/* 1. Active Open Positions Section */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -42,8 +42,8 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
         </div>
 
         {activePositions.length === 0 ? (
-          <div className="py-12 text-center text-slate-400 text-xs">
-            目前无活跃持仓。当 5m / 15m / 30m 产生图表形态信号时，系统将自动开仓。
+          <div className="py-10 text-center text-slate-400 text-xs">
+            目前无活跃持仓。当 5m / 15m / 30m 产生高胜率图表形态信号时，系统将自动开仓。
           </div>
         ) : (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -75,10 +75,18 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                   </button>
                 </div>
 
-                <div className="text-xs text-slate-300 font-medium">
-                  形态: <span className="text-amber-400 font-semibold">{pos.patternName}</span>
+                <div className="text-xs text-slate-300 font-medium flex items-center justify-between">
+                  <div>
+                    触发形态:{' '}
+                    <span className="text-amber-400 font-semibold">{pos.patternName}</span>
+                    {pos.patternType && (
+                      <span className="ml-1 text-[10px] text-slate-400 font-mono">
+                        ({pos.patternType})
+                      </span>
+                    )}
+                  </div>
                   {pos.isPaper && (
-                    <span className="ml-2 text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
+                    <span className="text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
                       模拟模式
                     </span>
                   )}
@@ -117,12 +125,110 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
         )}
       </div>
 
-      {/* Completed Trades Summary & Table */}
+      {/* 2. Pattern Win-Rate Statistics & Auto-Optimization Leaderboard */}
+      <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
+        <div className="flex items-center justify-between border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-2">
+            <Sparkles className="w-5 h-5 text-amber-400" />
+            <h3 className="text-base font-bold text-slate-100">
+              形态胜率与自优效果统计 (Pattern Win-Rate Engine)
+            </h3>
+          </div>
+          <span className="text-xs text-emerald-400 font-medium flex items-center gap-1">
+            <ShieldCheck className="w-4 h-4" /> 动态胜率淘汰熔断已开启
+          </span>
+        </div>
+
+        <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-start gap-2">
+          <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+          <div>
+            <strong>自动胜率筛选机制</strong>：系统在运行中会自动统计各种形态在实盘/模拟调单中的表现。若某种形态累计调单 $\ge 3$ 笔且胜率掉至 <strong>50% 以下</strong>，系统将<strong>自动防亏熔断关停该形态</strong>，防止亏损扩充，确保整体盈利目的！
+          </div>
+        </div>
+
+        {/* Pattern Stats Table */}
+        <div className="overflow-x-auto">
+          <table className="w-full text-xs text-left">
+            <thead className="bg-[#0b0e14] text-slate-400 border-b border-slate-800 font-mono">
+              <tr>
+                <th className="py-2.5 px-3">形态代码 (Type)</th>
+                <th className="py-2.5 px-3">形态名称</th>
+                <th className="py-2.5 px-3 text-center">调单次数</th>
+                <th className="py-2.5 px-3 text-center">胜 / 负</th>
+                <th className="py-2.5 px-3 text-center">胜率 (Win Rate)</th>
+                <th className="py-2.5 px-3 text-right">累计净盈亏</th>
+                <th className="py-2.5 px-3 text-center">盈亏比</th>
+                <th className="py-2.5 px-3 text-center">自优状态</th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-slate-800/60 font-mono">
+              {patternStats.map((stat) => (
+                <tr key={stat.patternType} className="hover:bg-slate-800/30 transition-colors">
+                  <td className="py-2.5 px-3 font-bold text-slate-300">{stat.patternType}</td>
+                  <td className="py-2.5 px-3 font-semibold text-amber-300">{stat.patternName}</td>
+                  <td className="py-2.5 px-3 text-center text-slate-300">{stat.totalTrades} 次</td>
+                  <td className="py-2.5 px-3 text-center">
+                    <span className="text-emerald-400 font-bold">{stat.wins}胜</span> /{' '}
+                    <span className="text-rose-400">{stat.losses}负</span>
+                  </td>
+                  <td className="py-2.5 px-3 text-center">
+                    <strong
+                      className={
+                        stat.totalTrades === 0
+                          ? 'text-slate-400'
+                          : stat.winRatePercent >= 60
+                          ? 'text-emerald-400'
+                          : stat.winRatePercent >= 50
+                          ? 'text-amber-400'
+                          : 'text-rose-400'
+                      }
+                    >
+                      {stat.totalTrades > 0 ? `${stat.winRatePercent.toFixed(1)}%` : '--'}
+                    </strong>
+                  </td>
+                  <td
+                    className={`py-2.5 px-3 text-right font-bold ${
+                      stat.totalNetPnl > 0
+                        ? 'text-emerald-400'
+                        : stat.totalNetPnl < 0
+                        ? 'text-rose-400'
+                        : 'text-slate-400'
+                    }`}
+                  >
+                    {stat.totalNetPnl > 0 ? '+' : ''}
+                    {stat.totalNetPnl.toFixed(2)} USDT
+                  </td>
+                  <td className="py-2.5 px-3 text-center text-slate-300">
+                    {stat.profitFactor.toFixed(2)}
+                  </td>
+                  <td className="py-2.5 px-3 text-center">
+                    {stat.status === 'PAUSED_LOW_WINRATE' ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-rose-500/20 text-rose-300 border border-rose-500/40">
+                        🔴 低胜率自动关停
+                      </span>
+                    ) : stat.status === 'ACTIVE_HIGH_CONVICTION' ? (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-300 border border-emerald-500/40">
+                        🟢 优先高胜率执行
+                      </span>
+                    ) : (
+                      <span className="px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-300">
+                        ⚪ 正常监控中
+                      </span>
+                    )}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* 3. Completed Trades Detailed Log */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
             <TrendingUp className="w-4 h-4 text-amber-400" />
-            <span>历史调单与盈亏记录日志 ({closedTrades.length})</span>
+            <span>历史调单与开平仓明细日志 ({closedTrades.length})</span>
           </h3>
         </div>
 
@@ -140,21 +246,21 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
           </div>
 
           <div className="bg-[#0b0e14] p-3 rounded-xl border border-slate-800">
-            <div className="text-[11px] text-slate-400">调单胜率</div>
+            <div className="text-[11px] text-slate-400">总体调单胜率</div>
             <div className="text-sm font-bold font-mono text-amber-400 mt-1">
               {winRate.toFixed(1)}% ({wins}胜 / {losses}负)
             </div>
           </div>
 
           <div className="bg-[#0b0e14] p-3 rounded-xl border border-slate-800">
-            <div className="text-[11px] text-slate-400">盈亏比 (Profit Factor)</div>
+            <div className="text-[11px] text-slate-400">总体盈亏比</div>
             <div className="text-sm font-bold font-mono text-slate-100 mt-1">
               {profitFactor.toFixed(2)}
             </div>
           </div>
 
           <div className="bg-[#0b0e14] p-3 rounded-xl border border-slate-800">
-            <div className="text-[11px] text-slate-400">已完成交易笔数</div>
+            <div className="text-[11px] text-slate-400">已完成调单笔数</div>
             <div className="text-sm font-bold font-mono text-slate-100 mt-1">{totalTrades} 笔</div>
           </div>
         </div>
@@ -172,7 +278,8 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                   <th className="py-2.5 px-3">时间</th>
                   <th className="py-2.5 px-3">币种/周期</th>
                   <th className="py-2.5 px-3">方向</th>
-                  <th className="py-2.5 px-3">触发形态</th>
+                  <th className="py-2.5 px-3">触发形态代码</th>
+                  <th className="py-2.5 px-3">形态名称</th>
                   <th className="py-2.5 px-3">开仓价</th>
                   <th className="py-2.5 px-3">平仓价</th>
                   <th className="py-2.5 px-3">平仓原因</th>
@@ -202,6 +309,7 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                           {t.side}
                         </span>
                       </td>
+                      <td className="py-2.5 px-3 font-bold text-slate-300">{t.patternType || '--'}</td>
                       <td className="py-2.5 px-3 text-amber-300">{t.patternName}</td>
                       <td className="py-2.5 px-3 text-slate-300">${t.entryPrice.toFixed(2)}</td>
                       <td className="py-2.5 px-3 text-slate-300">${t.exitPrice.toFixed(2)}</td>

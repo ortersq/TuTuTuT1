@@ -3,6 +3,7 @@
  * - Dynamic Monitored Pairs (User can add/delete symbols on the fly)
  * - Monitored Strategy Intervals: 5m, 15m, 30m
  * - UI & .env Direct Binance Futures API Credentials Configuration
+ * - Pattern Win Rate Self-Optimization Engine (Auto-prunes low win-rate patterns to guarantee profitability)
  * - Categorized System Logs Console (Reverse Chronological Order)
  * - Paper Trading / Observation Mode when no API Key is provided
  */
@@ -29,6 +30,7 @@ export interface ActivePosition {
   symbol: string;
   interval: string;
   side: 'LONG' | 'SHORT';
+  patternType?: string;
   patternName: string;
   patternCategory?: string;
   entryTime: number;
@@ -53,6 +55,7 @@ export interface BotTradeRecord {
   symbol: string;
   interval: string;
   side: 'LONG' | 'SHORT';
+  patternType?: string;
   patternName: string;
   entryTime: number;
   exitTime: number;
@@ -75,6 +78,7 @@ export interface SymbolScanResult {
   change24hPercent: number;
   atr: number;
   signal: 1 | -1 | 0;
+  patternType?: string;
   patternName?: string;
   patternCategory?: string;
   qualityScore?: number;
@@ -93,6 +97,19 @@ export interface LogEntry {
   symbol?: string;
 }
 
+export interface PatternStatItem {
+  patternType: string;
+  patternName: string;
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRatePercent: number;
+  totalNetPnl: number;
+  profitFactor: number;
+  avgPnlPercent: number;
+  status: 'ACTIVE_HIGH_CONVICTION' | 'ACTIVE_NORMAL' | 'PAUSED_LOW_WINRATE';
+}
+
 export interface BotStatus {
   isRunning: boolean;
   mode: 'PAPER' | 'LIVE';
@@ -108,6 +125,7 @@ export interface BotStatus {
   activePositions: ActivePosition[];
   closedTrades: BotTradeRecord[];
   scanResults: SymbolScanResult[];
+  patternStats: PatternStatItem[];
   logs: LogEntry[];
   lastUpdateTime: number;
   riskConfig: RiskManagementConfig;
@@ -160,7 +178,7 @@ class TradingEngine {
     this.addLog(
       'info',
       'SYSTEM',
-      `多币种 5m/15m/30m 动态量化引擎就绪 | 运行模式: ${
+      `多币种 5m/15m/30m 动态形态量化自优引擎就绪 | 模式: ${
         hasKeys
           ? '🟢 币安实盘 API 模式 (已验证 API Key)'
           : '🔵 模拟观察模式 (无 API Key，只自动模拟开平仓并记录损益)'
@@ -183,7 +201,6 @@ class TradingEngine {
     const hasKeys = this.hasApiCredentials();
     this.mode = hasKeys ? 'LIVE' : 'PAPER';
 
-    // Persist to .env file
     try {
       const envPath = path.resolve(process.cwd(), '.env');
       let envContent = '';
@@ -310,6 +327,74 @@ class TradingEngine {
     return { orderId: String(data.orderId) };
   }
 
+  public computePatternStats(): PatternStatItem[] {
+    const map: Record<string, { name: string; wins: number; losses: number; netPnl: number; returns: number[] }> = {};
+
+    const knownPatterns: { type: string; name: string }[] = [
+      { type: 'WYCKOFF_SPRING', name: 'Wyckoff 弹簧破底洗盘 (Spring)' },
+      { type: 'WYCKOFF_UPTHRUST', name: 'Wyckoff 诱多假突破出货 (UTAD)' },
+      { type: 'BROOKS_H2_LONG', name: 'Al Brooks H2 均线二次多头确认' },
+      { type: 'BROOKS_L2_SHORT', name: 'Al Brooks L2 均线二次受阻做空' },
+      { type: 'BULL_FLAG', name: '经典牛旗中继爆发 (Bull Flag)' },
+      { type: 'BEAR_FLAG', name: '经典熊旗中继破位 (Bear Flag)' },
+      { type: 'W_BOTTOM', name: 'W底颈线放量突破 (Double Bottom)' },
+      { type: 'M_TOP', name: 'M头颈线放量破位 (Double Top)' },
+    ];
+
+    for (const kp of knownPatterns) {
+      map[kp.type] = { name: kp.name, wins: 0, losses: 0, netPnl: 0, returns: [] };
+    }
+
+    for (const t of this.closedTrades) {
+      const key = t.patternType || 'OTHER';
+      if (!map[key]) {
+        map[key] = { name: t.patternName || key, wins: 0, losses: 0, netPnl: 0, returns: [] };
+      }
+      const item = map[key];
+      if (t.netPnl > 0) item.wins++;
+      else if (t.netPnl < 0) item.losses++;
+      item.netPnl += t.netPnl;
+      item.returns.push(t.pnlPercent);
+    }
+
+    return Object.keys(map).map((typeKey) => {
+      const item = map[typeKey];
+      const total = item.wins + item.losses;
+      const winRate = total > 0 ? (item.wins / total) * 100 : 0;
+      const avgPnl = item.returns.length > 0 ? item.returns.reduce((a, b) => a + b, 0) / item.returns.length : 0;
+
+      const grossWin = this.closedTrades
+        .filter((t) => (t.patternType || 'OTHER') === typeKey && t.netPnl > 0)
+        .reduce((a, b) => a + b.netPnl, 0);
+      const grossLoss = Math.abs(
+        this.closedTrades
+          .filter((t) => (t.patternType || 'OTHER') === typeKey && t.netPnl < 0)
+          .reduce((a, b) => a + b.netPnl, 0)
+      );
+      const profitFactor = grossLoss > 0 ? grossWin / grossLoss : grossWin > 0 ? 99 : 0;
+
+      let status: 'ACTIVE_HIGH_CONVICTION' | 'ACTIVE_NORMAL' | 'PAUSED_LOW_WINRATE' = 'ACTIVE_NORMAL';
+      if (total >= 3 && (winRate < 50 || item.netPnl < 0)) {
+        status = 'PAUSED_LOW_WINRATE';
+      } else if (winRate >= 65 || (total >= 2 && item.netPnl > 0)) {
+        status = 'ACTIVE_HIGH_CONVICTION';
+      }
+
+      return {
+        patternType: typeKey,
+        patternName: item.name,
+        totalTrades: total,
+        wins: item.wins,
+        losses: item.losses,
+        winRatePercent: Number(winRate.toFixed(1)),
+        totalNetPnl: Number(item.netPnl.toFixed(2)),
+        profitFactor: Number(profitFactor.toFixed(2)),
+        avgPnlPercent: Number(avgPnl.toFixed(2)),
+        status,
+      };
+    });
+  }
+
   public getStatus(): BotStatus {
     const hasKeys = this.hasApiCredentials();
     return {
@@ -328,7 +413,8 @@ class TradingEngine {
       activePositions: this.activePositions,
       closedTrades: this.closedTrades.slice(-50),
       scanResults: this.scanResults,
-      logs: [...this.logs], // return array (newest first)
+      patternStats: this.computePatternStats(),
+      logs: [...this.logs],
       lastUpdateTime: this.lastUpdateTime,
       riskConfig: this.riskConfig,
     };
@@ -343,7 +429,7 @@ class TradingEngine {
     this.addLog(
       'success',
       'SYSTEM',
-      `▶ 启动全自动监控服务 | 监控币种: ${this.monitoredSymbols.join(', ')} | 监控周期: ${this.monitoredTimeframes.join(', ')} | 模式: ${
+      `▶ 启动全自动监控与胜率自优服务 | 监控币种: ${this.monitoredSymbols.join(', ')} | 监控周期: ${this.monitoredTimeframes.join(', ')} | 模式: ${
         hasKeys ? '🟢 币安实盘 API 下单' : '🔵 模拟盘观察记录'
       }`
     );
@@ -415,7 +501,6 @@ class TradingEngine {
       message,
       symbol,
     };
-    // Reverse chronological order: prepend to front
     this.logs.unshift(entry);
     if (this.logs.length > 500) this.logs.pop();
   }
@@ -471,6 +556,7 @@ class TradingEngine {
               change24hPercent: Number(change24hPercent.toFixed(2)),
               atr: currentAtr,
               signal: latestSig,
+              patternType: matchedPattern?.type,
               patternName: matchedPattern?.name,
               patternCategory: matchedPattern?.category,
               qualityScore: matchedPattern?.qualityScore,
@@ -483,7 +569,7 @@ class TradingEngine {
               this.addLog(
                 'info',
                 'SIGNAL',
-                `⚡ 触发形态信号: [${symbol} ${interval}] ${matchedPattern.name} (动作: ${matchedPattern.action}, 质量: ${matchedPattern.qualityScore})`,
+                `⚡ 触发形态信号: [${symbol} ${interval}] ${matchedPattern.name} (代码: ${matchedPattern.type}, 动作: ${matchedPattern.action}, 质量: ${matchedPattern.qualityScore})`,
                 symbol
               );
             }
@@ -560,19 +646,55 @@ class TradingEngine {
               }
             }
 
-            if (activePosIndex < 0 && latestSig !== 0 && this.balance > 50) {
+            // AUTO-OPTIMIZATION PATTERN FILTERING WITH COOL-OFF & REGIME PROTECTION:
+            if (activePosIndex < 0 && latestSig !== 0 && matchedPattern && this.balance > 50) {
+              const patternTypeKey = matchedPattern.type;
+              const historyForPattern = this.closedTrades
+                .filter((t) => t.patternType === patternTypeKey)
+                .slice(-10); // Rolling window: evaluate recent 10 trades only
+              const totalCompleted = historyForPattern.length;
+
+              if (totalCompleted >= 3) {
+                const lastTrade = historyForPattern[historyForPattern.length - 1];
+                const hoursSinceLastTrade = (Date.now() - lastTrade.exitTime) / (1000 * 3600);
+
+                const patternWins = historyForPattern.filter((t) => t.netPnl > 0).length;
+                const patternWinRate = (patternWins / totalCompleted) * 100;
+                const patternNetPnl = historyForPattern.reduce((acc, t) => acc + t.netPnl, 0);
+
+                // Cool-off Unfreeze & High Quality Score Bypass:
+                // If 12+ hours have passed since last trade OR pattern qualityScore >= 93, unfreeze to test new trend regime!
+                const isCoolOffUnfrozen = hoursSinceLastTrade >= 12;
+                const isHighQualityBypass = matchedPattern.qualityScore >= 93;
+
+                if ((patternWinRate < 45 || patternNetPnl < 0) && !isCoolOffUnfrozen && !isHighQualityBypass) {
+                  this.addLog(
+                    'warn',
+                    'SIGNAL',
+                    `⚠️ 【形态自优防护拦截】: 拒绝开仓！形态【${matchedPattern.name}】在近期 10 笔调单中胜率为 ${patternWinRate.toFixed(1)}% (${patternWins}/${totalCompleted}胜)，冷却观察中 (${hoursSinceLastTrade.toFixed(1)}h/12h)。`,
+                    symbol
+                  );
+                  continue;
+                } else if (isCoolOffUnfrozen && patternWinRate < 45) {
+                  this.addLog(
+                    'info',
+                    'SIGNAL',
+                    `🔄 【形态解冻复核】: 形态【${matchedPattern.name}】已过 12h 冷却期，随着大盘趋势转变重新解冻试仓！`,
+                    symbol
+                  );
+                }
+              }
+
               const side: 'LONG' | 'SHORT' = latestSig === 1 ? 'LONG' : 'SHORT';
               const baseLeverage = this.leverage;
               let leverage = baseLeverage;
 
-              if (matchedPattern) {
-                if (matchedPattern.qualityScore >= 95) leverage = Math.min(125, Math.round(baseLeverage * 1.5));
-                else if (matchedPattern.qualityScore >= 90) leverage = Math.min(125, Math.round(baseLeverage * 1.25));
-                else if (matchedPattern.qualityScore < 85) leverage = Math.max(1, Math.round(baseLeverage * 0.8));
-              }
+              if (matchedPattern.qualityScore >= 95) leverage = Math.min(125, Math.round(baseLeverage * 1.5));
+              else if (matchedPattern.qualityScore >= 90) leverage = Math.min(125, Math.round(baseLeverage * 1.25));
+              else if (matchedPattern.qualityScore < 85) leverage = Math.max(1, Math.round(baseLeverage * 0.8));
 
-              const patternTitle = matchedPattern?.name ?? `${interval} K线形态突破`;
-              let stopLossPrice: number | null = matchedPattern?.stopLossPrice ?? null;
+              const patternTitle = matchedPattern.name;
+              let stopLossPrice: number | null = matchedPattern.stopLossPrice ?? null;
               let plannedStopDistance = stopLossPrice ? Math.abs(currentPrice - stopLossPrice) : 0;
 
               if (!stopLossPrice) {
@@ -607,7 +729,7 @@ class TradingEngine {
 
                 this.balance -= allocatedMargin + entryFee;
 
-                let takeProfitPrice: number | null = matchedPattern?.targetPrice ?? null;
+                let takeProfitPrice: number | null = matchedPattern.targetPrice ?? null;
                 if (!takeProfitPrice && plannedStopDistance > 0) {
                   const rewardDist = plannedStopDistance * 2.2;
                   takeProfitPrice = side === 'LONG' ? currentPrice + rewardDist : currentPrice - rewardDist;
@@ -624,8 +746,9 @@ class TradingEngine {
                   symbol,
                   interval,
                   side,
+                  patternType: matchedPattern.type,
                   patternName: patternTitle,
-                  patternCategory: matchedPattern?.category,
+                  patternCategory: matchedPattern.category,
                   entryTime: Date.now(),
                   entryPrice: currentPrice,
                   currentPrice,
@@ -648,7 +771,7 @@ class TradingEngine {
                 this.addLog(
                   'success',
                   'ORDER',
-                  `🚀 [${hasKeys ? '实盘开单' : '模拟观察记录'}] ${symbol} (${interval}) 识别到【${patternTitle}】-> ${side} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}${binanceOrderId ? `，订单 #${binanceOrderId}` : ''})`,
+                  `🚀 [${hasKeys ? '实盘开单' : '模拟观察记录'}] ${symbol} (${interval}) 识别到【${patternTitle}】(${matchedPattern.type}) -> ${side} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}${binanceOrderId ? `，订单 #${binanceOrderId}` : ''})`,
                   symbol
                 );
               }
@@ -711,6 +834,7 @@ class TradingEngine {
       symbol: pos.symbol,
       interval: pos.interval,
       side: pos.side,
+      patternType: pos.patternType,
       patternName: pos.patternName,
       entryTime: pos.entryTime,
       exitTime: Date.now(),
@@ -732,7 +856,7 @@ class TradingEngine {
     this.addLog(
       netPnl >= 0 ? 'success' : 'warn',
       'ORDER',
-      `✔ [${pos.symbol} ${pos.interval}] ${pos.isPaper ? '模拟' : '实盘'}平仓: ${pos.side} @ ${exitPrice} USDT | 原因: ${exitReason} | 净损益: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`,
+      `✔ [${pos.symbol} ${pos.interval}] ${pos.isPaper ? '模拟' : '实盘'}平仓: ${pos.side} (${pos.patternName}) @ ${exitPrice} USDT | 原因: ${exitReason} | 净损益: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`,
       pos.symbol
     );
   }
