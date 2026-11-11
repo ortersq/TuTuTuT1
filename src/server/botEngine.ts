@@ -510,7 +510,17 @@ class TradingEngine {
       // 6. Auto Open Position on Verified Chart Pattern
       if (!this.activePosition && latestSig !== 0 && this.balance > 50) {
         const side: 'LONG' | 'SHORT' = latestSig === 1 ? 'LONG' : 'SHORT';
-        const leverage = this.leverage;
+        const baseLeverage = this.leverage;
+        let leverage = baseLeverage;
+        if (matchedPattern) {
+          if (matchedPattern.qualityScore >= 95) {
+            leverage = Math.min(125, Math.round(baseLeverage * 1.5));
+          } else if (matchedPattern.qualityScore >= 90) {
+            leverage = Math.min(125, Math.round(baseLeverage * 1.25));
+          } else if (matchedPattern.qualityScore < 85) {
+            leverage = Math.max(1, Math.round(baseLeverage * 0.8));
+          }
+        }
         const patternTitle = matchedPattern?.name ?? 'K线高胜率形态突破';
 
         let stopLossPrice: number | null = matchedPattern?.stopLossPrice ?? null;

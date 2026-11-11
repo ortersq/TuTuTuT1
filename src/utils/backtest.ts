@@ -165,8 +165,18 @@ export function runFuturesBacktest(klines: Kline[], config: BacktestConfig): Bac
 
     if (!activePosition && sig !== 0 && currentCash > 50 && !isCircuitBreakerTripped) {
       const side = sig === 1 ? 'LONG' : 'SHORT';
-      const leverage = Math.max(1, config.risk.leverage);
+      const baseLeverage = Math.max(1, config.risk.leverage);
       const matchedPattern = patternMap.get(i);
+      let leverage = baseLeverage;
+      if (matchedPattern) {
+        if (matchedPattern.qualityScore >= 95) {
+          leverage = Math.min(125, Math.round(baseLeverage * 1.5));
+        } else if (matchedPattern.qualityScore >= 90) {
+          leverage = Math.min(125, Math.round(baseLeverage * 1.25));
+        } else if (matchedPattern.qualityScore < 85) {
+          leverage = Math.max(1, Math.round(baseLeverage * 0.8));
+        }
+      }
 
       // Determine Position Size based on Risk Mode
       let allocatedMargin = 0;
