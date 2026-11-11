@@ -85,11 +85,17 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                       </span>
                     )}
                   </div>
-                  {pos.isPaper && (
-                    <span className="text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
-                      模拟模式
+                  <div className="flex items-center gap-2">
+                    <span className="text-[10px] text-amber-300/90 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded">
+                      ⏱ 已持仓 {Math.floor((Date.now() - pos.entryTime) / (1000 * 60))} 分钟 (限高{' '}
+                      {pos.interval === '5m' ? '2h' : pos.interval === '15m' ? '6h' : '12h'})
                     </span>
-                  )}
+                    {pos.isPaper && (
+                      <span className="text-[10px] text-sky-400 bg-sky-500/10 px-1.5 py-0.5 rounded">
+                        模拟模式
+                      </span>
+                    )}
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-3 gap-2 text-xs font-mono bg-[#111726] p-2.5 rounded-lg border border-slate-800">
