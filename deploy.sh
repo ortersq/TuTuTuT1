@@ -7,6 +7,7 @@
 # ==============================================================================
 
 set -e
+trap 'echo -e "\n${RED}[部署中断] 脚本在第 $LINENO 行发生异常。请查看上方错误信息。${NC}"' ERR
 
 # Colors
 RED='\033[0;31m'
@@ -40,7 +41,7 @@ else
   echo -e "${YELLOW}[警告] 未能检测到标准 os-release，将按 RHEL/CentOS 规范执行安装${NC}"
 fi
 
-# 3. 内存与 SWAP 交换空间检查 (防止小内存云主机构建 OOM)
+# 3. 内存与 SWAP 交换空间检查 (关键：物理内存低于 4GB 且无 SWAP 时必须创建，防止构建时 OOM 崩溃)
 echo -e "\n${BLUE}[2/6] 检查服务器物理内存与 SWAP 交换空间...${NC}"
 TOTAL_RAM_KB=$(grep MemTotal /proc/meminfo | awk '{print $2}')
 TOTAL_SWAP_KB=$(grep SwapTotal /proc/meminfo | awk '{print $2}')
@@ -50,22 +51,25 @@ TOTAL_SWAP_MB=$((TOTAL_SWAP_KB / 1024))
 echo -e "  • 当前物理内存: ${GREEN}${TOTAL_RAM_MB} MB${NC}"
 echo -e "  • 当前 SWAP 分区: ${GREEN}${TOTAL_SWAP_MB} MB${NC}"
 
-if [ "$TOTAL_RAM_MB" -lt 1800 ] && [ "$TOTAL_SWAP_MB" -lt 1000 ]; then
-  echo -e "${YELLOW}  [优化] 检测到物理内存低于 2GB，正在配置 2GB SWAP 防护，保障构建与后台运行稳定性...${NC}"
+if [ "$TOTAL_RAM_MB" -lt 4096 ] && [ "$TOTAL_SWAP_MB" -lt 1024 ]; then
+  echo -e "${YELLOW}  [优化] 检测到物理内存为 ${TOTAL_RAM_MB}MB 且无足够 SWAP，正在配置 2GB SWAP 交换空间以防构建时 OOM 内存溢出...${NC}"
   if [ ! -f /swapfile ]; then
-    fallocate -l 2G /swapfile || dd if=/dev/zero of=/swapfile bs=1M count=2048
+    dd if=/dev/zero of=/swapfile bs=1M count=2048 status=none
     chmod 600 /swapfile
     mkswap /swapfile
     swapon /swapfile
     if ! grep -q '/swapfile' /etc/fstab; then
       echo '/swapfile none swap sw 0 0' >> /etc/fstab
     fi
-    echo -e "${GREEN}  ✓ 2GB SWAP 创建成功${NC}"
+    echo -e "${GREEN}  ✓ 2GB SWAP 创建并启用成功${NC}"
+  elif ! swapon --show | grep -q '/swapfile'; then
+    swapon /swapfile || true
+    echo -e "${GREEN}  ✓ 挂载已有 SWAP 成功${NC}"
   fi
 fi
 
 # 4. 安装基础依赖、Node.js 20 LTS 与 PM2
-echo -e "\n${BLUE}[3/6] 安装系统基础库、Node.js 20 LTS 与 PM2 进程守护管理器...${NC}"
+echo -e "\n${BLUE}[3/6] 安装系统基础库、Node.js 20 LTS、PM2 与 tsx 执行引擎...${NC}"
 dnf install -y curl wget git tar gcc-c++ make
 
 NEED_NODE_INSTALL=0
@@ -86,22 +90,23 @@ fi
 
 echo -e "  • Node.js: ${GREEN}$(node -v)${NC} | NPM: ${GREEN}$(npm -v)${NC}"
 
-# 安装 PM2 全局守护工具
-if ! command -v pm2 >/dev/null 2>&1; then
-  echo -e "  • 正在安装全局 PM2 生产进程管理器..."
-  npm install -g pm2
-fi
-echo -e "  • PM2: ${GREEN}$(pm2 -v)${NC}"
+# 安装 PM2 和 tsx 全局工具
+echo -e "  • 检查并配置全局 PM2 与 tsx 运行环境..."
+npm install -g pm2 tsx --no-fund --no-audit
+
+echo -e "  • PM2 版本: ${GREEN}$(pm2 -v)${NC}"
 
 # 5. 编译构建与依赖安装
 echo -e "\n${BLUE}[4/6] 安装项目依赖并编译生产前端资源...${NC}"
 APP_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$APP_DIR"
 
-npm install --silent
+echo -e "  • 正在执行 npm install (优化参数防冲突与网络超时)..."
+npm install --no-audit --no-fund --legacy-peer-deps
+echo -e "${GREEN}  ✓ 依赖安装成功${NC}"
 
-echo -e "  • 开始打包编译静态资源..."
-npm run build
+echo -e "  • 正在打包前端静态资源 (Vite build)..."
+NODE_OPTIONS="--max-old-space-size=2048" npm run build
 echo -e "${GREEN}  ✓ 前端编译打包完成${NC}"
 
 # 6. 配置防火墙与开放 3000 端口
@@ -119,18 +124,18 @@ echo -e "\n${BLUE}[6/6] 配置 PM2 启动 24/7 量化交易守护进程...${NC}"
 pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
 
 # 启动 Node 进程，指定端口为 3000
-PORT=$PORT NODE_ENV=production pm2 start "npx tsx server.ts" --name "$APP_NAME"
+PORT=$PORT NODE_ENV=production pm2 start npm --name "$APP_NAME" -- run start
 pm2 save
 
 # 设置开机自启
 pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
 
 # 等待 2 秒检查健康状态
-sleep 2
+sleep 3
 HEALTH_CHECK=$(curl -s "http://127.0.0.1:${PORT}/api/bot/status" || echo "failed")
 
-if [ "$HEALTH_CHECK" != "failed" ]; then
-  echo -e "${GREEN}  ✓ 本地服务健康自检通过 (HTTP 200 OK)${NC}"
+if [ "$HEALTH_CHECK" != "failed" ] && [[ "$HEALTH_CHECK" == *"isRunning"* ]]; then
+  echo -e "${GREEN}  ✓ 本地服务健康自检通过 (HTTP 200 OK，机器人状态正常)${NC}"
 else
   echo -e "${YELLOW}  • 服务已提交后台，正在初始化...${NC}"
 fi
