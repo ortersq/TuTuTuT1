@@ -57,10 +57,12 @@ app.get('/api/binance/klines', async (req, res) => {
 });
 
 async function startServer() {
-  const isProduction = process.env.NODE_ENV === 'production' || fs.existsSync(path.resolve(__dirname, 'dist'));
+  const distPath = path.resolve(__dirname, 'dist');
+  const distIndex = path.resolve(distPath, 'index.html');
+  const hasBuiltDist = fs.existsSync(distIndex);
 
-  if (!isProduction) {
-    // In development, mount Vite dev server middlewares
+  if (!hasBuiltDist) {
+    // Mount Vite dev server middlewares if dist/index.html is not built
     const { createServer: createViteServer } = await import('vite');
     const vite = await createViteServer({
       server: { middlewareMode: true },
@@ -68,11 +70,10 @@ async function startServer() {
     });
     app.use(vite.middlewares);
   } else {
-    // In production, serve static files from dist/
-    const distPath = path.resolve(__dirname, 'dist');
+    // Serve static files from dist/
     app.use(express.static(distPath));
-    app.get('*', (req, res) => {
-      res.sendFile(path.resolve(distPath, 'index.html'));
+    app.use((req, res) => {
+      res.sendFile(distIndex);
     });
   }
 

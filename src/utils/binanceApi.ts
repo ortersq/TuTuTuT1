@@ -151,12 +151,10 @@ export function runMultiStrategyBenchmark(
 ): MultiStrategyComparison {
   const allStrategies: StrategyKey[] = [
     'pattern_price_action',
-    'ensemble',
-    'supertrend',
-    'dual_thrust',
-    'bollinger_rsi',
-    'macd_vpa',
-    'grid_atr',
+    'wyckoff_spring_utad',
+    'brooks_h2_l2',
+    'flag_breakout',
+    'double_top_bottom',
   ];
 
   const results = allStrategies.map((stratKey) => {

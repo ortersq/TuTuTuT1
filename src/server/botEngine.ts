@@ -1,30 +1,31 @@
 /**
- * Autonomous Live / Paper Trading Bot Engine for Binance Futures
- * Fully handles:
- * - 24/7 background loop
- * - Auto strategy optimization (dynamically selects champion strategy)
- * - Auto order entry (Long / Short)
- * - Auto position exit (TP, SL, Trailing stop, Signal reversal)
- * - Auto position sizing & risk management (margin limits, circuit breaker)
+ * Autonomous Chart Pattern Trading Bot Engine for Binance Futures
+ * - 100% Real Binance K-line data polling
+ * - Pure Chart Pattern & Price Action signal recognition
+ * - Historical accuracy self-optimization (auto-selects highest win-rate pattern family)
+ * - Direct Binance Futures API (fapi.binance.com) HMAC-SHA256 order execution when BINANCE_API_KEY is configured in .env
  */
 
+import crypto from 'crypto';
+import dotenv from 'dotenv';
 import {
   BacktestConfig,
   ExitReason,
-  Kline,
-  PositionSide,
   RiskManagementConfig,
   StrategyKey,
   StrategyParams,
 } from '../types/trading';
 import { fetchBinanceKlines, runMultiStrategyBenchmark } from '../utils/binanceApi';
 import { calculateATR } from '../utils/indicators';
-import { DEFAULT_STRATEGY_PARAMS, generateAllSignals, STRATEGY_CATALOG } from '../utils/strategies';
+import { DEFAULT_STRATEGY_PARAMS, generateAllSignals } from '../utils/strategies';
+
+dotenv.config();
 
 export interface ActivePosition {
   id: string;
   symbol: string;
   side: 'LONG' | 'SHORT';
+  patternName: string;
   entryTime: number;
   entryPrice: number;
   currentPrice: number;
@@ -38,12 +39,14 @@ export interface ActivePosition {
   trailingPeakPrice: number;
   liquidationPrice: number;
   strategyUsed: StrategyKey;
+  binanceOrderId?: string;
 }
 
 export interface BotTradeRecord {
   id: string;
   symbol: string;
   side: 'LONG' | 'SHORT';
+  patternName: string;
   entryTime: number;
   exitTime: number;
   entryPrice: number;
@@ -60,6 +63,8 @@ export interface BotTradeRecord {
 export interface BotStatus {
   isRunning: boolean;
   mode: 'PAPER' | 'LIVE';
+  hasBinanceKeys: boolean;
+  binanceEndpoint: string;
   symbol: string;
   interval: string;
   autoSelectChampion: boolean;
@@ -85,9 +90,9 @@ class TradingEngine {
   private symbol: string = 'BTCUSDT';
   private interval: string = '1h';
   private autoSelectChampion: boolean = true;
-  private currentStrategy: StrategyKey = 'ensemble';
-  private championStrategy: StrategyKey = 'supertrend';
-  private championStrategyName: string = 'SuperTrend + EMA200 动态趋势追踪策略';
+  private currentStrategy: StrategyKey = 'pattern_price_action';
+  private championStrategy: StrategyKey = 'pattern_price_action';
+  private championStrategyName: string = '全形态历史胜率自优引擎';
 
   private balance: number = 10000;
   private equity: number = 10000;
@@ -106,7 +111,7 @@ class TradingEngine {
     slAtrMultiplier: 2.0,
     tpMode: 'RISK_REWARD',
     tpPercent: 4.0,
-    tpRiskRewardRatio: 2.0,
+    tpRiskRewardRatio: 2.2,
     useTrailingStop: true,
     trailingCallbackPercent: 1.2,
     sizingMode: 'EQUITY_PERCENT',
@@ -122,13 +127,116 @@ class TradingEngine {
   private isProcessing: boolean = false;
 
   constructor() {
-    this.addLog('info', '量化自动化交易引擎初始化完成 (准备就绪)');
+    const hasKeys = this.hasApiCredentials();
+    this.addLog(
+      'info',
+      `形态量化自动交易引擎已就绪 | 币安实盘密钥状态: ${hasKeys ? '已配置 (.env)' : '未配置 (当前使用币安真实行情模拟撮合)'}`
+    );
+  }
+
+  private hasApiCredentials(): boolean {
+    const key = process.env.BINANCE_API_KEY?.trim();
+    const secret = process.env.BINANCE_API_SECRET?.trim();
+    return Boolean(key && secret && key !== 'MY_BINANCE_API_KEY');
+  }
+
+  private getFuturesBaseUrl(): string {
+    return process.env.BINANCE_USE_TESTNET === 'true'
+      ? 'https://testnet.binancefuture.com'
+      : 'https://fapi.binance.com';
+  }
+
+  private signQuery(queryString: string): string {
+    const secret = process.env.BINANCE_API_SECRET?.trim() || '';
+    return crypto.createHmac('sha256', secret).update(queryString).digest('hex');
+  }
+
+  /**
+   * Synchronize real USDT balance from Binance Futures account when in LIVE mode
+   */
+  private async syncBinanceFuturesBalance(): Promise<void> {
+    if (!this.hasApiCredentials()) return;
+    try {
+      const timestamp = Date.now();
+      const qs = `timestamp=${timestamp}&recvWindow=5000`;
+      const sig = this.signQuery(qs);
+      const res = await fetch(`${this.getFuturesBaseUrl()}/fapi/v2/balance?${qs}&signature=${sig}`, {
+        headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY!.trim() },
+      });
+      if (!res.ok) return;
+      const balances: any[] = await res.json();
+      const usdt = balances.find((b) => b.asset === 'USDT');
+      if (usdt && usdt.availableBalance) {
+        this.balance = parseFloat(usdt.availableBalance);
+        this.equity = parseFloat(usdt.balance || usdt.availableBalance);
+      }
+    } catch (err: any) {
+      this.addLog('warn', `同步币安合约账户余额异常: ${err.message}`);
+    }
+  }
+
+  /**
+   * Set leverage on Binance Futures when in LIVE mode
+   */
+  private async setBinanceLeverage(symbol: string, leverage: number): Promise<void> {
+    if (!this.hasApiCredentials()) return;
+    try {
+      const timestamp = Date.now();
+      const qs = `symbol=${symbol}&leverage=${leverage}&timestamp=${timestamp}&recvWindow=5000`;
+      const sig = this.signQuery(qs);
+      await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/leverage?${qs}&signature=${sig}`, {
+        method: 'POST',
+        headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY!.trim() },
+      });
+    } catch {
+      // Ignore non-fatal leverage sync errors
+    }
+  }
+
+  /**
+   * Place real signed MARKET order on Binance Futures (fapi.binance.com)
+   */
+  private async placeBinanceMarketOrder(
+    symbol: string,
+    side: 'BUY' | 'SELL',
+    quantity: number,
+    reduceOnly: boolean = false
+  ): Promise<{ orderId: string } | null> {
+    if (!this.hasApiCredentials()) {
+      throw new Error('服务器 .env 未配置 BINANCE_API_KEY 和 BINANCE_API_SECRET');
+    }
+
+    // Format quantity to 3 decimal places for BTC/ETH, 1 for others
+    const precision = symbol.startsWith('BTC') || symbol.startsWith('ETH') ? 3 : 1;
+    const formattedQty = Number(quantity.toFixed(precision));
+    if (formattedQty <= 0) {
+      throw new Error(`下单数量过小 (${quantity.toFixed(5)})，无法满足币安合约最小下单精度`);
+    }
+
+    const timestamp = Date.now();
+    const qs = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${formattedQty}${
+      reduceOnly ? '&reduceOnly=true' : ''
+    }&timestamp=${timestamp}&recvWindow=5000`;
+    const sig = this.signQuery(qs);
+
+    const res = await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/order?${qs}&signature=${sig}`, {
+      method: 'POST',
+      headers: { 'X-MBX-APIKEY': process.env.BINANCE_API_KEY!.trim() },
+    });
+
+    const data = await res.json();
+    if (!res.ok) {
+      throw new Error(data.msg || `Binance API HTTP ${res.status}`);
+    }
+    return { orderId: String(data.orderId) };
   }
 
   public getStatus(): BotStatus {
     return {
       isRunning: this.isRunning,
       mode: this.mode,
+      hasBinanceKeys: this.hasApiCredentials(),
+      binanceEndpoint: this.getFuturesBaseUrl(),
       symbol: this.symbol,
       interval: this.interval,
       autoSelectChampion: this.autoSelectChampion,
@@ -142,8 +250,8 @@ class TradingEngine {
         this.peakEquity > 0 ? ((this.peakEquity - this.equity) / this.peakEquity) * 100 : 0,
       leverage: this.leverage,
       activePosition: this.activePosition,
-      closedTrades: this.closedTrades.slice(-50), // Last 50 trades
-      logs: this.logs.slice(-60), // Last 60 logs
+      closedTrades: this.closedTrades.slice(-50),
+      logs: this.logs.slice(-60),
       marketRegime: this.marketRegime,
       lastUpdateTime: this.lastUpdateTime,
       riskConfig: this.riskConfig,
@@ -153,8 +261,13 @@ class TradingEngine {
   public start() {
     if (this.isRunning) return;
     this.isRunning = true;
-    this.addLog('success', `▶ 启动自动化实盘机器人: ${this.symbol} (${this.interval} 周期，杠杆 ${this.leverage}x)`);
-    // Run immediately then schedule loop every 12 seconds
+    this.addLog(
+      'success',
+      `▶ 启动形态量化自动机器人: ${this.symbol} (${this.interval} 周期，杠杆 ${this.leverage}x，模式: ${
+        this.mode === 'LIVE' ? '币安实盘 API 下单' : '币安真实行情模拟'
+      })`
+    );
+
     this.executeCycle();
     this.timer = setInterval(() => this.executeCycle(), 12000);
   }
@@ -166,7 +279,7 @@ class TradingEngine {
       clearInterval(this.timer);
       this.timer = null;
     }
-    this.addLog('warn', '⏸ 自动化交易机器人已暂停运行');
+    this.addLog('warn', '⏸ 形态量化机器人已暂停运行');
   }
 
   public updateConfig(newConfig: {
@@ -184,20 +297,33 @@ class TradingEngine {
       this.leverage = newConfig.leverage;
       this.riskConfig.leverage = newConfig.leverage;
     }
-    if (newConfig.mode) this.mode = newConfig.mode;
+    if (newConfig.mode) {
+      if (newConfig.mode === 'LIVE' && !this.hasApiCredentials()) {
+        this.addLog(
+          'warn',
+          '⚠️ 切换到实盘模式提示: 请在服务器 .env 文件中填入 BINANCE_API_KEY 与 BINANCE_API_SECRET 以启用币安合约真实下单'
+        );
+      }
+      this.mode = newConfig.mode;
+    }
     if (newConfig.autoSelectChampion !== undefined) this.autoSelectChampion = newConfig.autoSelectChampion;
     if (newConfig.currentStrategy) this.currentStrategy = newConfig.currentStrategy;
     if (newConfig.riskConfig) {
       this.riskConfig = { ...this.riskConfig, ...newConfig.riskConfig };
     }
-    this.addLog('info', `配置已更新: ${this.symbol} | ${this.interval} | 杠杆 ${this.leverage}x | 自动最优: ${this.autoSelectChampion ? '开启' : '关闭'}`);
+    this.addLog(
+      'info',
+      `配置已更新: ${this.symbol} | ${this.interval} | 杠杆 ${this.leverage}x | 自动寻优形态: ${
+        this.autoSelectChampion ? '开启' : '关闭'
+      }`
+    );
   }
 
-  public emergencyClosePosition(reason: ExitReason = 'END_OF_DATA') {
+  public async emergencyClosePosition(reason: ExitReason = 'END_OF_DATA') {
     if (!this.activePosition) return;
     const pos = this.activePosition;
-    this.closePosition(pos.currentPrice, reason);
-    this.addLog('warn', `⚠️ 手动/紧急平仓成功: ${pos.side} @ ${pos.currentPrice} USDT`);
+    await this.closePosition(pos.currentPrice, reason);
+    this.addLog('warn', `⚠️ 手动/紧急平仓完成: ${pos.side} @ ${pos.currentPrice} USDT`);
   }
 
   private addLog(level: 'info' | 'warn' | 'success' | 'error', message: string) {
@@ -206,16 +332,17 @@ class TradingEngine {
     if (this.logs.length > 200) this.logs.shift();
   }
 
-  /**
-   * Main autonomous trading loop
-   */
   private async executeCycle() {
     if (this.isProcessing) return;
     this.isProcessing = true;
     this.lastUpdateTime = Date.now();
 
     try {
-      // 1. Fetch live historical K-lines from Binance official API
+      if (this.mode === 'LIVE' && this.hasApiCredentials()) {
+        await this.syncBinanceFuturesBalance();
+      }
+
+      // 1. Fetch 100% real historical K-lines from Binance official API
       const fetchResult = await fetchBinanceKlines({
         symbol: this.symbol,
         interval: this.interval,
@@ -229,11 +356,10 @@ class TradingEngine {
       }
 
       const latestBar = klines[klines.length - 1];
-      const prevBar = klines[klines.length - 2];
       const currentPrice = latestBar.close;
       const currentAtr = calculateATR(klines, 14)[klines.length - 1] ?? (latestBar.high - latestBar.low);
 
-      // 2. Auto Strategy Optimization: Benchmark 6 strategies to select current champion
+      // 2. Auto Pattern Family Optimization: Benchmark pattern families on recent real K-lines
       if (this.autoSelectChampion) {
         const dummyConfig: BacktestConfig = {
           symbol: this.symbol,
@@ -243,7 +369,7 @@ class TradingEngine {
           makerFeeRate: 0.0002,
           takerFeeRate: 0.0005,
           slippageRate: 0.0005,
-          strategy: 'ensemble',
+          strategy: 'pattern_price_action',
           params: this.params,
         };
 
@@ -254,19 +380,18 @@ class TradingEngine {
           this.championStrategyName = best.name;
           this.addLog(
             'success',
-            `👑 市场状态变化，系统自动切换为当前最优策略: 【${best.name}】(实盘回测胜率: ${best.metrics.winRatePercent.toFixed(1)}%, 盈亏比: ${best.metrics.profitFactor.toFixed(2)})`
+            `👑 历史数据自优完成，锁定当前最高胜率形态组合: 【${best.name}】(历史胜率: ${best.metrics.winRatePercent.toFixed(1)}%, 盈亏比: ${best.metrics.profitFactor.toFixed(2)})`
           );
         }
       }
 
       const activeStrategyKey = this.autoSelectChampion ? this.championStrategy : this.currentStrategy;
 
-      // 3. Update active position mark price and check Stop Loss / Take Profit / Trailing
+      // 3. Update active position mark price & evaluate SL / TP / Trailing Stop
       if (this.activePosition) {
         const pos = this.activePosition;
         pos.currentPrice = currentPrice;
 
-        // Unrealized PnL
         if (pos.side === 'LONG') {
           pos.unrealizedPnl = (currentPrice - pos.entryPrice) * pos.quantity;
         } else {
@@ -274,51 +399,46 @@ class TradingEngine {
         }
         pos.unrealizedPnlPercent = (pos.unrealizedPnl / pos.marginUsed) * 100;
 
-        // Trailing Peak Price update
         if (pos.side === 'LONG' && currentPrice > pos.trailingPeakPrice) {
           pos.trailingPeakPrice = currentPrice;
         } else if (pos.side === 'SHORT' && currentPrice < pos.trailingPeakPrice) {
           pos.trailingPeakPrice = currentPrice;
         }
 
-        // Check Liquidation Protection
         if (pos.side === 'LONG' && currentPrice <= pos.liquidationPrice) {
-          this.addLog('error', `🚨 触发多单强平预警保护，系统已强制止损防穿仓！`);
-          this.closePosition(currentPrice, 'LIQUIDATION');
+          this.addLog('error', `🚨 触发多单强平保护线，强制平仓！`);
+          await this.closePosition(currentPrice, 'LIQUIDATION');
           return;
         } else if (pos.side === 'SHORT' && currentPrice >= pos.liquidationPrice) {
-          this.addLog('error', `🚨 触发空单强平预警保护，系统已强制止损防穿仓！`);
-          this.closePosition(currentPrice, 'LIQUIDATION');
+          this.addLog('error', `🚨 触发空单强平保护线，强制平仓！`);
+          await this.closePosition(currentPrice, 'LIQUIDATION');
           return;
         }
 
-        // Check Stop Loss
         if (pos.stopLossPrice !== null) {
           if (pos.side === 'LONG' && currentPrice <= pos.stopLossPrice) {
-            this.addLog('warn', `🛑 触发多头止损点: ${currentPrice} <= ${pos.stopLossPrice.toFixed(2)} USDT`);
-            this.closePosition(currentPrice, 'STOP_LOSS');
+            this.addLog('warn', `🛑 触发形态结构止损: ${currentPrice} <= ${pos.stopLossPrice.toFixed(2)} USDT`);
+            await this.closePosition(currentPrice, 'STOP_LOSS');
             return;
           } else if (pos.side === 'SHORT' && currentPrice >= pos.stopLossPrice) {
-            this.addLog('warn', `🛑 触发空头止损点: ${currentPrice} >= ${pos.stopLossPrice.toFixed(2)} USDT`);
-            this.closePosition(currentPrice, 'STOP_LOSS');
+            this.addLog('warn', `🛑 触发形态结构止损: ${currentPrice} >= ${pos.stopLossPrice.toFixed(2)} USDT`);
+            await this.closePosition(currentPrice, 'STOP_LOSS');
             return;
           }
         }
 
-        // Check Take Profit
         if (pos.takeProfitPrice !== null) {
           if (pos.side === 'LONG' && currentPrice >= pos.takeProfitPrice) {
-            this.addLog('success', `🎯 触发多头目标止盈: ${currentPrice} >= ${pos.takeProfitPrice.toFixed(2)} USDT`);
-            this.closePosition(currentPrice, 'TAKE_PROFIT');
+            this.addLog('success', `🎯 触发形态目标止盈: ${currentPrice} >= ${pos.takeProfitPrice.toFixed(2)} USDT`);
+            await this.closePosition(currentPrice, 'TAKE_PROFIT');
             return;
           } else if (pos.side === 'SHORT' && currentPrice <= pos.takeProfitPrice) {
-            this.addLog('success', `🎯 触发空头目标止盈: ${currentPrice} <= ${pos.takeProfitPrice.toFixed(2)} USDT`);
-            this.closePosition(currentPrice, 'TAKE_PROFIT');
+            this.addLog('success', `🎯 触发形态目标止盈: ${currentPrice} <= ${pos.takeProfitPrice.toFixed(2)} USDT`);
+            await this.closePosition(currentPrice, 'TAKE_PROFIT');
             return;
           }
         }
 
-        // Check Trailing Stop
         if (this.riskConfig.useTrailingStop && this.riskConfig.trailingCallbackPercent > 0) {
           const cb = this.riskConfig.trailingCallbackPercent / 100;
           if (pos.side === 'LONG') {
@@ -326,8 +446,8 @@ class TradingEngine {
             if (gain >= cb) {
               const stopLine = pos.trailingPeakPrice * (1 - cb);
               if (currentPrice <= stopLine) {
-                this.addLog('success', `✦ 触发移动追踪止盈: 价格自峰值回撤达到 ${this.riskConfig.trailingCallbackPercent}%，锁定利润出局！`);
-                this.closePosition(currentPrice, 'TRAILING_STOP');
+                this.addLog('success', `✦ 触发移动追踪止盈: 价格自峰值回撤达到 ${this.riskConfig.trailingCallbackPercent}%，锁定利润平仓！`);
+                await this.closePosition(currentPrice, 'TRAILING_STOP');
                 return;
               }
             }
@@ -336,8 +456,8 @@ class TradingEngine {
             if (gain >= cb) {
               const stopLine = pos.trailingPeakPrice * (1 + cb);
               if (currentPrice >= stopLine) {
-                this.addLog('success', `✦ 触发移动追踪止盈: 空头自低点反弹达到 ${this.riskConfig.trailingCallbackPercent}%，锁定利润出局！`);
-                this.closePosition(currentPrice, 'TRAILING_STOP');
+                this.addLog('success', `✦ 触发移动追踪止盈: 空头自低点反弹达到 ${this.riskConfig.trailingCallbackPercent}%，锁定利润平仓！`);
+                await this.closePosition(currentPrice, 'TRAILING_STOP');
                 return;
               }
             }
@@ -345,66 +465,68 @@ class TradingEngine {
         }
       }
 
-      // Update total equity
       const unrealizedTotal = this.activePosition ? this.activePosition.unrealizedPnl : 0;
       this.equity = Math.max(0, this.balance + unrealizedTotal);
       if (this.equity > this.peakEquity) this.peakEquity = this.equity;
 
-      // Circuit Breaker check
       const currentDD =
         this.peakEquity > 0 ? ((this.peakEquity - this.equity) / this.peakEquity) * 100 : 0;
       if (
         this.riskConfig.maxAllowedDrawdownPercent > 0 &&
         currentDD >= this.riskConfig.maxAllowedDrawdownPercent
       ) {
-        this.addLog('error', `🛑 触发账户整体回撤熔断线 (${currentDD.toFixed(1)}% >= ${this.riskConfig.maxAllowedDrawdownPercent}%)，自动暂停新开单！`);
+        this.addLog(
+          'error',
+          `🛑 触发账户最大回撤熔断保护 (${currentDD.toFixed(1)}% >= ${this.riskConfig.maxAllowedDrawdownPercent}%)，暂停新开仓！`
+        );
         return;
       }
 
-      // 4. Calculate Signals from selected strategy
-      const allSignals = generateAllSignals(klines, this.params);
-      let strategySignals = allSignals.ensemble;
-      if (activeStrategyKey === 'pattern_price_action') strategySignals = allSignals.patternPriceAction;
-      else if (activeStrategyKey === 'supertrend') strategySignals = allSignals.supertrend;
-      else if (activeStrategyKey === 'dual_thrust') strategySignals = allSignals.dualThrust;
-      else if (activeStrategyKey === 'bollinger_rsi') strategySignals = allSignals.bollingerRsi;
-      else if (activeStrategyKey === 'macd_vpa') strategySignals = allSignals.macdVpa;
-      else if (activeStrategyKey === 'grid_atr') strategySignals = allSignals.gridAtr;
+      // 4. Evaluate Chart Pattern Signal on latest closed/live K-line
+      const { signals, patternMap, regimes } = generateAllSignals(
+        klines,
+        this.params,
+        activeStrategyKey
+      );
+      const latestIndex = signals.length - 1;
+      const latestSig = signals[latestIndex];
+      const matchedPattern = patternMap.get(latestIndex);
+      this.marketRegime = regimes[latestIndex];
 
-      const latestSig = strategySignals[strategySignals.length - 1];
-      this.marketRegime = allSignals.regimes[allSignals.regimes.length - 1];
-
-      // 5. Signal Reversal Exit
+      // 5. Reversal Exit if opposite pattern confirmed
       if (this.activePosition) {
         if (
           (this.activePosition.side === 'LONG' && latestSig === -1) ||
           (this.activePosition.side === 'SHORT' && latestSig === 1)
         ) {
-          this.addLog('info', `🔄 策略出现反向开单信号，先平仓当前 ${this.activePosition.side} 头寸`);
-          this.closePosition(currentPrice, 'SIGNAL_REVERSAL');
+          this.addLog(
+            'info',
+            `🔄 检测到反向形态【${matchedPattern?.name ?? '反向形态'}】，先平仓当前 ${this.activePosition.side} 头寸`
+          );
+          await this.closePosition(currentPrice, 'SIGNAL_REVERSAL');
         }
       }
 
-      // 6. Auto Open Position on Signal
+      // 6. Auto Open Position on Verified Chart Pattern
       if (!this.activePosition && latestSig !== 0 && this.balance > 50) {
         const side: 'LONG' | 'SHORT' = latestSig === 1 ? 'LONG' : 'SHORT';
         const leverage = this.leverage;
+        const patternTitle = matchedPattern?.name ?? 'K线高胜率形态突破';
 
-        // Auto Position Sizing
-        let allocatedMargin = 0;
-        let plannedStopDistance = 0;
+        let stopLossPrice: number | null = matchedPattern?.stopLossPrice ?? null;
+        let plannedStopDistance = stopLossPrice ? Math.abs(currentPrice - stopLossPrice) : 0;
 
-        // SL price calculation
-        let stopLossPrice: number | null = null;
-        if (this.riskConfig.slMode === 'PERCENT' && this.riskConfig.slPercent > 0) {
-          plannedStopDistance = currentPrice * (this.riskConfig.slPercent / 100);
-          stopLossPrice = side === 'LONG' ? currentPrice - plannedStopDistance : currentPrice + plannedStopDistance;
-        } else if (this.riskConfig.slMode === 'ATR' && this.riskConfig.slAtrMultiplier > 0) {
-          plannedStopDistance = currentAtr * this.riskConfig.slAtrMultiplier;
-          stopLossPrice = side === 'LONG' ? currentPrice - plannedStopDistance : currentPrice + plannedStopDistance;
+        if (!stopLossPrice) {
+          if (this.riskConfig.slMode === 'PERCENT' && this.riskConfig.slPercent > 0) {
+            plannedStopDistance = currentPrice * (this.riskConfig.slPercent / 100);
+            stopLossPrice = side === 'LONG' ? currentPrice - plannedStopDistance : currentPrice + plannedStopDistance;
+          } else if (this.riskConfig.slMode === 'ATR' && this.riskConfig.slAtrMultiplier > 0) {
+            plannedStopDistance = currentAtr * this.riskConfig.slAtrMultiplier;
+            stopLossPrice = side === 'LONG' ? currentPrice - plannedStopDistance : currentPrice + plannedStopDistance;
+          }
         }
 
-        // Margin calculation
+        let allocatedMargin = 0;
         if (this.riskConfig.sizingMode === 'FIXED_AMOUNT') {
           const targetNotional = Math.min(this.riskConfig.fixedAmountUSDT, this.balance * leverage);
           allocatedMargin = targetNotional / leverage;
@@ -414,35 +536,54 @@ class TradingEngine {
           const targetQty = dist > 0 ? dollarRisk / dist : 0;
           allocatedMargin = Math.min(this.balance * 0.9, (targetQty * currentPrice) / leverage);
         } else {
-          // EQUITY_PERCENT
           const pct = Math.min(100, Math.max(5, this.riskConfig.positionSizePercent));
           allocatedMargin = this.balance * (pct / 100);
         }
 
         const positionNotional = allocatedMargin * leverage;
         const quantity = positionNotional / currentPrice;
-        const entryFee = positionNotional * 0.0005; // 0.05% taker fee
+        const entryFee = positionNotional * 0.0005;
 
         if (this.balance >= allocatedMargin + entryFee && quantity > 0) {
-          this.balance -= allocatedMargin + entryFee;
+          let binanceOrderId: string | undefined;
 
-          // TP price calculation
-          let takeProfitPrice: number | null = null;
-          if (this.riskConfig.tpMode === 'PERCENT' && this.riskConfig.tpPercent > 0) {
-            takeProfitPrice =
-              side === 'LONG'
-                ? currentPrice * (1 + this.riskConfig.tpPercent / 100)
-                : currentPrice * (1 - this.riskConfig.tpPercent / 100);
-          } else if (
-            this.riskConfig.tpMode === 'RISK_REWARD' &&
-            this.riskConfig.tpRiskRewardRatio > 0 &&
-            plannedStopDistance > 0
-          ) {
-            const rewardDist = plannedStopDistance * this.riskConfig.tpRiskRewardRatio;
-            takeProfitPrice = side === 'LONG' ? currentPrice + rewardDist : currentPrice - rewardDist;
+          if (this.mode === 'LIVE') {
+            if (!this.hasApiCredentials()) {
+              this.addLog(
+                'error',
+                `❌ 形态【${patternTitle}】已触发，但服务器 .env 未配置 BINANCE_API_KEY，无法向币安发送实盘订单！`
+              );
+              return;
+            }
+            await this.setBinanceLeverage(this.symbol, leverage);
+            const orderRes = await this.placeBinanceMarketOrder(
+              this.symbol,
+              side === 'LONG' ? 'BUY' : 'SELL',
+              quantity,
+              false
+            );
+            binanceOrderId = orderRes?.orderId;
           }
 
-          // Liquidation Price calculation
+          this.balance -= allocatedMargin + entryFee;
+
+          let takeProfitPrice: number | null = matchedPattern?.targetPrice ?? null;
+          if (!takeProfitPrice) {
+            if (this.riskConfig.tpMode === 'PERCENT' && this.riskConfig.tpPercent > 0) {
+              takeProfitPrice =
+                side === 'LONG'
+                  ? currentPrice * (1 + this.riskConfig.tpPercent / 100)
+                  : currentPrice * (1 - this.riskConfig.tpPercent / 100);
+            } else if (
+              this.riskConfig.tpMode === 'RISK_REWARD' &&
+              this.riskConfig.tpRiskRewardRatio > 0 &&
+              plannedStopDistance > 0
+            ) {
+              const rewardDist = plannedStopDistance * this.riskConfig.tpRiskRewardRatio;
+              takeProfitPrice = side === 'LONG' ? currentPrice + rewardDist : currentPrice - rewardDist;
+            }
+          }
+
           const mmr = 0.005;
           const liqPrice =
             side === 'LONG'
@@ -453,6 +594,7 @@ class TradingEngine {
             id: `bot_pos_${Date.now()}`,
             symbol: this.symbol,
             side,
+            patternName: patternTitle,
             entryTime: Date.now(),
             entryPrice: currentPrice,
             currentPrice,
@@ -466,24 +608,38 @@ class TradingEngine {
             trailingPeakPrice: currentPrice,
             liquidationPrice: Math.max(0, liqPrice),
             strategyUsed: activeStrategyKey,
+            binanceOrderId,
           };
 
           this.addLog(
             'success',
-            `🚀 【自动开单成功】: ${side} ${this.symbol} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}，止损: ${stopLossPrice ? stopLossPrice.toFixed(1) : '无'}，止盈: ${takeProfitPrice ? takeProfitPrice.toFixed(1) : '无'})`
+            `🚀 【形态触发自动开单】: 识别到【${patternTitle}】-> ${side} ${this.symbol} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}，结构止损: ${stopLossPrice ? stopLossPrice.toFixed(2) : '无'}，目标止盈: ${takeProfitPrice ? takeProfitPrice.toFixed(2) : '无'}${binanceOrderId ? `，币安订单号 #${binanceOrderId}` : ''})`
           );
         }
       }
     } catch (err: any) {
-      this.addLog('error', `交易轮询发生异常: ${err.message || '网络连接超时'}`);
+      this.addLog('error', `轮询或币安下单异常: ${err.message || '网络连接超时'}`);
     } finally {
       this.isProcessing = false;
     }
   }
 
-  private closePosition(exitPrice: number, exitReason: ExitReason) {
+  private async closePosition(exitPrice: number, exitReason: ExitReason) {
     if (!this.activePosition) return;
     const pos = this.activePosition;
+
+    if (this.mode === 'LIVE' && this.hasApiCredentials()) {
+      try {
+        await this.placeBinanceMarketOrder(
+          pos.symbol,
+          pos.side === 'LONG' ? 'SELL' : 'BUY',
+          pos.quantity,
+          true
+        );
+      } catch (err: any) {
+        this.addLog('error', `币安实盘平仓请求异常: ${err.message}`);
+      }
+    }
 
     const exitNotional = pos.quantity * exitPrice;
     const exitFee = exitNotional * (exitReason === 'TAKE_PROFIT' ? 0.0002 : 0.0005);
@@ -507,6 +663,7 @@ class TradingEngine {
       id: pos.id,
       symbol: pos.symbol,
       side: pos.side,
+      patternName: pos.patternName,
       entryTime: pos.entryTime,
       exitTime: Date.now(),
       entryPrice: pos.entryPrice,
@@ -525,10 +682,9 @@ class TradingEngine {
 
     this.addLog(
       netPnl >= 0 ? 'success' : 'warn',
-      `✔ 【自动平仓结算】: ${pos.side} 平仓价 ${exitPrice} USDT | 原因: ${exitReason} | 净盈亏: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
+      `✔ 【形态交易平仓】: [${pos.patternName}] ${pos.side} 平仓价 ${exitPrice} USDT | 原因: ${exitReason} | 净盈亏: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`
     );
   }
 }
 
-// Export singleton instance
 export const botEngine = new TradingEngine();

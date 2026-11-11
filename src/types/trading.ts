@@ -1,5 +1,5 @@
 /**
- * Trading types and definitions for Binance Futures multi-strategy lab
+ * Trading types and definitions for Binance Futures Chart Pattern Quant System
  */
 
 export interface Kline {
@@ -32,19 +32,17 @@ export interface DataSourceAudit {
 }
 
 export type StrategyKey =
-  | 'ensemble'
   | 'pattern_price_action'
-  | 'supertrend'
-  | 'dual_thrust'
-  | 'bollinger_rsi'
-  | 'macd_vpa'
-  | 'grid_atr';
+  | 'wyckoff_spring_utad'
+  | 'brooks_h2_l2'
+  | 'flag_breakout'
+  | 'double_top_bottom';
 
 export interface StrategyInfo {
   key: StrategyKey;
   name: string;
   authorOrOrigin: string;
-  category: '趋势追踪' | '突破策略' | '均值回归' | '动量量价' | '网格对冲' | '综合自适应';
+  category: '全形态自优' | '流动性猎杀' | '回踩二次确认' | '顺势突破' | '经典几何反转';
   summary: string;
   description: string;
   pros: string[];
@@ -67,35 +65,31 @@ export type TakeProfitMode = 'PERCENT' | 'RISK_REWARD' | 'NONE';
 export type PositionSizeMode = 'EQUITY_PERCENT' | 'FIXED_AMOUNT' | 'RISK_PARITY_ATR';
 
 export interface RiskManagementConfig {
-  // Stop Loss
   slMode: StopLossMode;
-  slPercent: number;          // e.g., 2.5%
-  slAtrMultiplier: number;    // e.g., 2.0x ATR
+  slPercent: number;
+  slAtrMultiplier: number;
 
-  // Take Profit
   tpMode: TakeProfitMode;
-  tpPercent: number;          // e.g., 5.0%
-  tpRiskRewardRatio: number;  // e.g., 2.0 (2:1 reward/risk)
+  tpPercent: number;
+  tpRiskRewardRatio: number;
 
-  // Trailing Stop
   useTrailingStop: boolean;
-  trailingCallbackPercent: number; // e.g., 1.5%
+  trailingCallbackPercent: number;
 
-  // Position Sizing
   sizingMode: PositionSizeMode;
-  positionSizePercent: number; // e.g., 20% of account equity
-  fixedAmountUSDT: number;     // e.g., 2000 USDT
-  riskPerTradePercent: number; // e.g., 1.5% capital risked on ATR stop distance
+  positionSizePercent: number;
+  fixedAmountUSDT: number;
+  riskPerTradePercent: number;
 
-  // Leverage & Safeguard
-  leverage: number;            // 1x - 50x
-  maxAllowedDrawdownPercent: number; // Circuit breaker, stops trading if drawdown > 25%
+  leverage: number;
+  maxAllowedDrawdownPercent: number;
 }
 
 export interface Trade {
   id: string;
   symbol: string;
   side: 'LONG' | 'SHORT';
+  patternName?: string;
   entryTime: number;
   exitTime: number;
   entryPrice: number;
@@ -127,40 +121,9 @@ export interface EquityPoint {
 }
 
 export interface StrategyParams {
-  // SuperTrend
-  supertrendPeriod: number;
-  supertrendMultiplier: number;
-  supertrendEmaFilter: number;
-
-  // Dual Thrust
-  dualThrustLookback: number;
-  dualThrustK1: number;
-  dualThrustK2: number;
-
-  // Bollinger + RSI
-  bbPeriod: number;
-  bbStdDev: number;
-  rsiPeriod: number;
-  rsiOversold: number;
-  rsiOverbought: number;
-
-  // MACD + VPA
-  macdFast: number;
-  macdSlow: number;
-  macdSignal: number;
-  volumeMultiplier: number;
-
-  // ATR Grid
-  gridLevels: number;
-  gridAtrMultiplier: number;
-
-  // Ensemble Weights
-  weightSuperTrend: number;
-  weightDualThrust: number;
-  weightBollingerRsi: number;
-  weightMacdVpa: number;
-  ensembleThreshold: number;
-  enableRegimeFilter: boolean;
+  minPatternQuality: number;
+  minHistoricalWinRate: number;
+  usePatternStructuralSlTp: boolean;
 }
 
 export interface BacktestConfig {
@@ -168,9 +131,9 @@ export interface BacktestConfig {
   interval: string;
   initialCapital: number;
   risk: RiskManagementConfig;
-  makerFeeRate: number;        // e.g., 0.0002 (0.02%)
-  takerFeeRate: number;        // e.g., 0.0005 (0.05%)
-  slippageRate: number;        // e.g., 0.0005 (0.05%)
+  makerFeeRate: number;
+  takerFeeRate: number;
+  slippageRate: number;
   strategy: StrategyKey;
   params: StrategyParams;
 }
@@ -210,7 +173,6 @@ export interface BacktestMetrics {
   totalFeesPaid: number;
   liquidationsCount: number;
 
-  // Risk analytics
   slTriggersCount: number;
   tpTriggersCount: number;
   trailingTriggersCount: number;

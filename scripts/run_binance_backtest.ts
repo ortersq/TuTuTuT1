@@ -63,7 +63,7 @@ async function main() {
     makerFeeRate: 0.0002,
     takerFeeRate: 0.0005,
     slippageRate: 0.0005,
-    strategy: 'ensemble',
+    strategy: 'pattern_price_action',
     params: DEFAULT_STRATEGY_PARAMS,
   };
 

@@ -123,21 +123,32 @@ fi
 echo -e "\n${BLUE}[6/6] 配置 PM2 启动 24/7 量化交易守护进程...${NC}"
 pm2 delete "$APP_NAME" >/dev/null 2>&1 || true
 
-# 启动 Node 进程，指定端口为 3000
-PORT=$PORT NODE_ENV=production pm2 start npm --name "$APP_NAME" -- run start
+# 清理占用 3000 端口的旧进程或冲突服务 (防止 EADDRINUSE)
+echo -e "  • 检查并清理占用 ${PORT} 端口的冲突进程..."
+fuser -k ${PORT}/tcp >/dev/null 2>&1 || true
+OLD_PIDS=$(ss -lptn "sport = :${PORT}" 2>/dev/null | grep -oP 'pid=\K[0-9]+' | sort -u || true)
+if [ -n "$OLD_PIDS" ]; then
+  for pid in $OLD_PIDS; do
+    kill -9 "$pid" >/dev/null 2>&1 || true
+  done
+fi
+sleep 1
+
+# 直接使用 tsx 启动 server.ts，避免 npm 包装层产生孤儿进程
+PORT=$PORT NODE_ENV=production pm2 start ./node_modules/.bin/tsx --name "$APP_NAME" -- server.ts
 pm2 save
 
 # 设置开机自启
 pm2 startup systemd -u root --hp /root >/dev/null 2>&1 || true
 
-# 等待 2 秒检查健康状态
+# 等待 3 秒检查健康状态
 sleep 3
 HEALTH_CHECK=$(curl -s "http://127.0.0.1:${PORT}/api/bot/status" || echo "failed")
 
-if [ "$HEALTH_CHECK" != "failed" ] && [[ "$HEALTH_CHECK" == *"isRunning"* ]]; then
+if [[ "$HEALTH_CHECK" == *"isRunning"* ]]; then
   echo -e "${GREEN}  ✓ 本地服务健康自检通过 (HTTP 200 OK，机器人状态正常)${NC}"
 else
-  echo -e "${YELLOW}  • 服务已提交后台，正在初始化...${NC}"
+  echo -e "${RED}  ✕ 警告: 端口 ${PORT} 自检异常，请执行 pm2 logs ${APP_NAME} 查看详情${NC}"
 fi
 
 # 获取公网 IP

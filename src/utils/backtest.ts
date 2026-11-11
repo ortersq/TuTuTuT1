@@ -15,6 +15,7 @@ interface OpenPosition {
   id: string;
   symbol: string;
   side: 'LONG' | 'SHORT';
+  patternName?: string;
   entryTime: number;
   entryIndex: number;
   entryPrice: number;
@@ -34,14 +35,11 @@ export function runFuturesBacktest(klines: Kline[], config: BacktestConfig): Bac
     throw new Error('K线数据量过少，至少需要 30 根 K 线进行回测');
   }
 
-  const signals = generateAllSignals(klines, config.params);
-  let activeSignals = signals.ensemble;
-  if (config.strategy === 'pattern_price_action') activeSignals = signals.patternPriceAction;
-  else if (config.strategy === 'supertrend') activeSignals = signals.supertrend;
-  else if (config.strategy === 'dual_thrust') activeSignals = signals.dualThrust;
-  else if (config.strategy === 'bollinger_rsi') activeSignals = signals.bollingerRsi;
-  else if (config.strategy === 'macd_vpa') activeSignals = signals.macdVpa;
-  else if (config.strategy === 'grid_atr') activeSignals = signals.gridAtr;
+  const { signals: activeSignals, patternMap, regimes } = generateAllSignals(
+    klines,
+    config.params,
+    config.strategy
+  );
   const atrValues = calculateATR(klines, 14);
 
   let currentCash = config.initialCapital;
@@ -65,7 +63,7 @@ export function runFuturesBacktest(klines: Kline[], config: BacktestConfig): Bac
     const closePrice = bar.close;
     const currentAtr = atrValues[i] ?? (highPrice - lowPrice);
 
-    if (signals.regimes[i] === 'TREND') trendingBars++;
+    if (regimes[i] === 'TREND') trendingBars++;
     else consolidationBars++;
 
     // 1. If we have an active position, evaluate Risk Management & Exits
@@ -168,14 +166,18 @@ export function runFuturesBacktest(klines: Kline[], config: BacktestConfig): Bac
     if (!activePosition && sig !== 0 && currentCash > 50 && !isCircuitBreakerTripped) {
       const side = sig === 1 ? 'LONG' : 'SHORT';
       const leverage = Math.max(1, config.risk.leverage);
+      const matchedPattern = patternMap.get(i);
 
       // Determine Position Size based on Risk Mode
       let allocatedMargin = 0;
       let plannedStopDistance = 0;
 
-      // Calculate Stop Loss Price & Distance
+      // Calculate Stop Loss Price & Distance (use Pattern Structural SL if enabled, fallback to Risk config)
       let stopLossPrice: number | null = null;
-      if (config.risk.slMode === 'PERCENT' && config.risk.slPercent > 0) {
+      if (config.params.usePatternStructuralSlTp && matchedPattern) {
+        stopLossPrice = matchedPattern.stopLossPrice;
+        plannedStopDistance = Math.abs(closePrice - stopLossPrice);
+      } else if (config.risk.slMode === 'PERCENT' && config.risk.slPercent > 0) {
         plannedStopDistance = closePrice * (config.risk.slPercent / 100);
         stopLossPrice = side === 'LONG' ? closePrice - plannedStopDistance : closePrice + plannedStopDistance;
       } else if (config.risk.slMode === 'ATR' && config.risk.slAtrMultiplier > 0) {
@@ -213,7 +215,9 @@ export function runFuturesBacktest(klines: Kline[], config: BacktestConfig): Bac
 
         // Take Profit Price Calculation
         let takeProfitPrice: number | null = null;
-        if (config.risk.tpMode === 'PERCENT' && config.risk.tpPercent > 0) {
+        if (config.params.usePatternStructuralSlTp && matchedPattern) {
+          takeProfitPrice = matchedPattern.targetPrice;
+        } else if (config.risk.tpMode === 'PERCENT' && config.risk.tpPercent > 0) {
           takeProfitPrice =
             side === 'LONG'
               ? actualEntryPrice * (1 + config.risk.tpPercent / 100)
@@ -240,6 +244,7 @@ export function runFuturesBacktest(klines: Kline[], config: BacktestConfig): Bac
           id: `trade_${i}_${side}`,
           symbol: config.symbol,
           side,
+          patternName: matchedPattern?.name ?? 'K线形态突破',
           entryTime: timestamp,
           entryIndex: i,
           entryPrice: actualEntryPrice,
@@ -364,6 +369,7 @@ function closePosition(
     id: pos.id,
     symbol: pos.symbol,
     side: pos.side,
+    patternName: pos.patternName,
     entryTime: pos.entryTime,
     exitTime,
     entryPrice: pos.entryPrice,

@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { Kline, Trade } from '../types/trading';
-import { calculateEMA, calculateSMA, calculateSuperTrend } from '../utils/indicators';
+import { calculateEMA } from '../utils/indicators';
 
 interface CandleChartProps {
   klines: Kline[];
@@ -19,29 +19,21 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
     );
   }
 
-  // Display the most recent 120 candles for high visual fidelity and clear candlestick bodies
   const visibleCount = Math.min(100, klines.length);
   const startIndex = klines.length - visibleCount;
   const visibleKlines = klines.slice(startIndex);
 
-  // Filter trades that occurred within this visible window
   const startTime = visibleKlines[0].timestamp;
   const endTime = visibleKlines[visibleKlines.length - 1].timestamp;
   const visibleTrades = trades.filter((t) => t.exitTime >= startTime && t.entryTime <= endTime);
 
-  // Indicators on visible window
   const closes = klines.map((k) => k.close);
-  const ema200Full = calculateEMA(closes, 200);
-  const stFull = calculateSuperTrend(klines, 10, 3.0);
-  const volFull = klines.map((k) => k.volume);
-  const volSmaFull = calculateSMA(volFull, 20);
+  const ema20Full = calculateEMA(closes, 20);
+  const ema50Full = calculateEMA(closes, 50);
 
-  const ema200 = ema200Full.slice(startIndex);
-  const supertrend = stFull.supertrend.slice(startIndex);
-  const stTrend = stFull.trend.slice(startIndex);
-  const volSma = volSmaFull.slice(startIndex);
+  const ema20 = ema20Full.slice(startIndex);
+  const ema50 = ema50Full.slice(startIndex);
 
-  // Scales
   let minPrice = Infinity;
   let maxPrice = -Infinity;
   let maxVol = 0;
@@ -73,23 +65,20 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
   };
 
   const candleWidth = Math.max(2, (plotWidth / visibleKlines.length) * 0.68);
-
   const hoveredBar = hoverIndex !== null ? visibleKlines[hoverIndex] : visibleKlines[visibleKlines.length - 1];
 
   return (
     <div className="bg-[#111726] border border-slate-800/90 rounded-xl p-4.5 mb-5">
-      {/* Header with real-time OHLCV Bar HUD */}
       <div className="flex flex-wrap items-center justify-between gap-4 mb-2 text-xs">
         <div className="flex items-center gap-2">
           <span className="text-sm font-semibold text-slate-200">
-            {symbol} 合约K线与交易信号点位 (Candlesticks & Trade Markers)
+            {symbol} 合约K线与形态触发位 (Candlesticks & Pattern Markers)
           </span>
           <span className="text-slate-500 font-mono">
             {new Date(hoveredBar.timestamp).toLocaleString()}
           </span>
         </div>
 
-        {/* OHLCV Bar Details */}
         <div className="flex items-center gap-3 font-mono text-[11px] text-slate-400">
           <span>O: <strong className="text-slate-200 tabular-nums">{hoveredBar.open}</strong></span>
           <span>H: <strong className="text-emerald-400 tabular-nums">{hoveredBar.high}</strong></span>
@@ -99,7 +88,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
         </div>
       </div>
 
-      {/* SVG Canvas */}
       <div className="relative w-full overflow-hidden">
         <svg
           viewBox={`0 0 ${width} ${height}`}
@@ -113,7 +101,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
           }}
           onMouseLeave={() => setHoverIndex(null)}
         >
-          {/* Price grid lines */}
           {[0, 0.25, 0.5, 0.75, 1].map((pct, idx) => {
             const y = margin.top + plotHeight * pct;
             const priceVal = yMax - pct * yRange;
@@ -139,7 +126,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
             );
           })}
 
-          {/* Volume separator */}
           <line
             x1={margin.left}
             y1={margin.top + plotHeight + 10}
@@ -148,7 +134,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
             stroke="#1e293b"
           />
 
-          {/* Candlesticks & Volume Bars */}
           {visibleKlines.map((k, idx) => {
             const x = getX(idx);
             const isBull = k.close >= k.open;
@@ -166,7 +151,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
 
             return (
               <g key={k.timestamp}>
-                {/* Volume Bar */}
                 <rect
                   x={x - candleWidth / 2}
                   y={volY}
@@ -176,7 +160,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
                   opacity={0.65}
                 />
 
-                {/* Candle Wick */}
                 <line
                   x1={x}
                   y1={yHigh}
@@ -186,7 +169,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
                   strokeWidth={1}
                 />
 
-                {/* Candle Body */}
                 <rect
                   x={x - candleWidth / 2}
                   y={bodyTop}
@@ -199,43 +181,51 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
             );
           })}
 
-          {/* SuperTrend Overlay Line */}
           {visibleKlines.map((_, idx) => {
             if (idx === 0) return null;
-            const prevSt = supertrend[idx - 1];
-            const curSt = supertrend[idx];
-            if (prevSt === null || curSt === null) return null;
-
-            const x1 = getX(idx - 1);
-            const y1 = getY(prevSt);
-            const x2 = getX(idx);
-            const y2 = getY(curSt);
-            const dir = stTrend[idx];
+            const e20Prev = ema20[idx - 1];
+            const e20Cur = ema20[idx];
+            if (e20Prev === null || e20Cur === null) return null;
 
             return (
               <line
-                key={`st_${idx}`}
-                x1={x1}
-                y1={y1}
-                x2={x2}
-                y2={y2}
-                stroke={dir === 1 ? '#34d399' : '#f87171'}
-                strokeWidth={1.5}
-                strokeDasharray="3 2"
+                key={`e20_${idx}`}
+                x1={getX(idx - 1)}
+                y1={getY(e20Prev)}
+                x2={getX(idx)}
+                y2={getY(e20Cur)}
+                stroke="#fbbf24"
+                strokeWidth={1.2}
               />
             );
           })}
 
-          {/* Trade Execution Markers */}
+          {visibleKlines.map((_, idx) => {
+            if (idx === 0) return null;
+            const e50Prev = ema50[idx - 1];
+            const e50Cur = ema50[idx];
+            if (e50Prev === null || e50Cur === null) return null;
+
+            return (
+              <line
+                key={`e50_${idx}`}
+                x1={getX(idx - 1)}
+                y1={getY(e50Prev)}
+                x2={getX(idx)}
+                y2={getY(e50Cur)}
+                stroke="#38bdf8"
+                strokeWidth={1.2}
+              />
+            );
+          })}
+
           {visibleTrades.map((t) => {
-            // Find bar index for entry
             const entryBarIdx = visibleKlines.findIndex(
               (k, i) =>
                 t.entryTime >= k.timestamp &&
                 (i === visibleKlines.length - 1 || t.entryTime < visibleKlines[i + 1].timestamp)
             );
 
-            // Find bar index for exit
             const exitBarIdx = visibleKlines.findIndex(
               (k, i) =>
                 t.exitTime >= k.timestamp &&
@@ -246,7 +236,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
 
             return (
               <g key={t.id}>
-                {/* Entry Marker */}
                 {entryBarIdx >= 0 && (
                   <g transform={`translate(${getX(entryBarIdx)}, ${getY(t.entryPrice)})`}>
                     <polygon
@@ -263,12 +252,11 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
                       textAnchor="middle"
                       fill={isLong ? '#34d399' : '#fb7185'}
                     >
-                      {isLong ? '做多' : '做空'}
+                      {t.patternName ? t.patternName.split(' ')[0] : isLong ? '多头开仓' : '空头开仓'}
                     </text>
                   </g>
                 )}
 
-                {/* Exit Marker */}
                 {exitBarIdx >= 0 && (
                   <g transform={`translate(${getX(exitBarIdx)}, ${getY(t.exitPrice)})`}>
                     <circle
@@ -301,7 +289,6 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
             );
           })}
 
-          {/* Hover Crosshair */}
           {hoverIndex !== null && (
             <g>
               <line
@@ -327,24 +314,27 @@ export const CandleChart: React.FC<CandleChartProps> = ({ klines, trades, symbol
         </svg>
       </div>
 
-      {/* Legend Footer */}
       <div className="flex flex-wrap items-center justify-between gap-4 mt-3 pt-2.5 border-t border-slate-800/60 text-xs text-slate-400">
         <div className="flex items-center gap-4">
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 bg-emerald-500 rounded-sm" />
-            <span>做多开仓 / 盈利平仓</span>
+            <span>多头形态开仓 / 盈利平仓</span>
           </div>
           <div className="flex items-center gap-1.5">
             <span className="w-2.5 h-2.5 bg-rose-500 rounded-sm" />
-            <span>做空开仓 / 止损平仓</span>
+            <span>空头形态开仓 / 止损平仓</span>
           </div>
           <div className="flex items-center gap-1.5">
-            <span className="w-3 h-0.5 bg-emerald-400 border-dashed" />
-            <span>SuperTrend 动态支撑阻力</span>
+            <span className="w-3 h-0.5 bg-amber-400" />
+            <span>EMA 20 均线</span>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <span className="w-3 h-0.5 bg-sky-400" />
+            <span>EMA 50 均线</span>
           </div>
         </div>
         <div className="text-slate-500">
-          图表展示最近 {visibleCount} 根 K 线完整交易信号映射
+          图表展示最近 {visibleCount} 根 K 线图形形态触发与开平仓映射
         </div>
       </div>
     </div>
