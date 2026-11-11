@@ -2,6 +2,7 @@
  * Autonomous Multi-Symbol & Multi-Timeframe Chart Pattern Trading Engine
  * - Dynamic Monitored Pairs (User can add/delete symbols on the fly)
  * - Monitored Strategy Intervals: 5m, 15m, 30m
+ * - Heartbeat Check & Live Market Trend Regime Monitoring (60s Periodic Heartbeat Logs)
  * - UI & .env Direct Binance Futures API Credentials Configuration
  * - Pattern Win Rate Self-Optimization Engine (Auto-prunes low win-rate patterns to guarantee profitability)
  * - Categorized System Logs Console (Reverse Chronological Order)
@@ -20,7 +21,7 @@ import {
   StrategyParams,
 } from '../types/trading';
 import { fetchBinanceKlines } from '../utils/binanceApi';
-import { calculateATR } from '../utils/indicators';
+import { calculateATR, calculateEMA } from '../utils/indicators';
 import { DEFAULT_STRATEGY_PARAMS, generateAllSignals } from '../utils/strategies';
 
 dotenv.config();
@@ -77,6 +78,8 @@ export interface SymbolScanResult {
   currentPrice: number;
   change24hPercent: number;
   atr: number;
+  trendContext: 'BULL_TREND' | 'BEAR_TREND' | 'RANGE_BOUND';
+  trendDescription: string;
   signal: 1 | -1 | 0;
   patternType?: string;
   patternName?: string;
@@ -150,6 +153,7 @@ class TradingEngine {
   private scanResults: SymbolScanResult[] = [];
   private logs: LogEntry[] = [];
   private lastUpdateTime: number = Date.now();
+  private cycleCounter: number = 0;
 
   private riskConfig: RiskManagementConfig = {
     slMode: 'ATR',
@@ -178,7 +182,7 @@ class TradingEngine {
     this.addLog(
       'info',
       'SYSTEM',
-      `多币种 5m/15m/30m 动态形态量化自优引擎就绪 | 模式: ${
+      `多币种 5m/15m/30m 动态形态量化引擎就绪 | 心跳检测机制: 开启 | 模式: ${
         hasKeys
           ? '🟢 币安实盘 API 模式 (已验证 API Key)'
           : '🔵 模拟观察模式 (无 API Key，只自动模拟开平仓并记录损益)'
@@ -509,6 +513,7 @@ class TradingEngine {
     if (this.isProcessing) return;
     this.isProcessing = true;
     this.lastUpdateTime = Date.now();
+    this.cycleCounter++;
 
     try {
       const hasKeys = this.hasApiCredentials();
@@ -539,6 +544,25 @@ class TradingEngine {
             const currentAtr =
               calculateATR(klines, 14)[klines.length - 1] ?? (latestBar.high - latestBar.low);
 
+            const closes = klines.map((k) => k.close);
+            const ema20Arr = calculateEMA(closes, 20);
+            const ema50Arr = calculateEMA(closes, 50);
+            const e20 = ema20Arr[ema20Arr.length - 1];
+            const e50 = ema50Arr[ema50Arr.length - 1];
+
+            let trendContext: 'BULL_TREND' | 'BEAR_TREND' | 'RANGE_BOUND' = 'RANGE_BOUND';
+            let trendDescription = '🟡 箱体震荡整理 (EMA20/50 交叉粘合)';
+
+            if (e20 !== null && e50 !== null) {
+              if (e20 > e50 * 1.001) {
+                trendContext = 'BULL_TREND';
+                trendDescription = '🟢 多头主升趋势 (EMA20 > EMA50 向上多头发散)';
+              } else if (e20 < e50 * 0.999) {
+                trendContext = 'BEAR_TREND';
+                trendDescription = '🔴 空头主跌趋势 (EMA20 < EMA50 向下空头发散)';
+              }
+            }
+
             const { signals, patternMap } = generateAllSignals(
               klines,
               this.params,
@@ -555,6 +579,8 @@ class TradingEngine {
               currentPrice,
               change24hPercent: Number(change24hPercent.toFixed(2)),
               atr: currentAtr,
+              trendContext,
+              trendDescription,
               signal: latestSig,
               patternType: matchedPattern?.type,
               patternName: matchedPattern?.name,
@@ -651,7 +677,7 @@ class TradingEngine {
               const patternTypeKey = matchedPattern.type;
               const historyForPattern = this.closedTrades
                 .filter((t) => t.patternType === patternTypeKey)
-                .slice(-10); // Rolling window: evaluate recent 10 trades only
+                .slice(-10);
               const totalCompleted = historyForPattern.length;
 
               if (totalCompleted >= 3) {
@@ -662,8 +688,6 @@ class TradingEngine {
                 const patternWinRate = (patternWins / totalCompleted) * 100;
                 const patternNetPnl = historyForPattern.reduce((acc, t) => acc + t.netPnl, 0);
 
-                // Cool-off Unfreeze & High Quality Score Bypass:
-                // If 12+ hours have passed since last trade OR pattern qualityScore >= 93, unfreeze to test new trend regime!
                 const isCoolOffUnfrozen = hoursSinceLastTrade >= 12;
                 const isHighQualityBypass = matchedPattern.qualityScore >= 93;
 
@@ -783,6 +807,30 @@ class TradingEngine {
       }
 
       this.scanResults = updatedScans;
+
+      // PERIODIC HEARTBEAT LOG (every 6 cycles = 60 seconds)
+      if (this.cycleCounter % 6 === 0) {
+        const trendSummaries = this.monitoredSymbols
+          .map((sym) => {
+            const scan =
+              updatedScans.find((s) => s.symbol === sym && s.interval === '15m') ||
+              updatedScans.find((s) => s.symbol === sym);
+            const trendLabel =
+              scan?.trendContext === 'BULL_TREND'
+                ? '🟢多头主升'
+                : scan?.trendContext === 'BEAR_TREND'
+                ? '🔴空头主跌'
+                : '🟡箱体震荡';
+            return `${sym.replace('USDT', '')}: ${trendLabel} ($${scan?.currentPrice.toLocaleString() || 0})`;
+          })
+          .join(' | ');
+
+        this.addLog(
+          'info',
+          'SYSTEM',
+          `💓 [系统心跳存活自检 OK] 策略引擎实时运算正常 | 监控 ${this.monitoredSymbols.length} 个币种 (${this.monitoredTimeframes.join('/')}) | 实时盘面趋势: [${trendSummaries}] | 活跃持仓: ${this.activePositions.length} 笔 | 账户净值: $${this.equity.toFixed(2)}`
+        );
+      }
 
       let totalUnrealizedPnl = 0;
       for (const pos of this.activePositions) {

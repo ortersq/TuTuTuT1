@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { BotStatus, SymbolScanResult, ActivePosition } from '../server/botEngine';
-import { Activity, ShieldCheck, Zap, LineChart, AlertTriangle } from 'lucide-react';
+import { Activity, ShieldCheck, Zap, LineChart, AlertTriangle, Compass, HeartPulse } from 'lucide-react';
 import { CandleChart } from './CandleChart';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { Kline } from '../types/trading';
@@ -13,7 +13,6 @@ interface MultiSymbolScannerProps {
 
 export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
   status,
-  onRefreshStatus,
   onClosePosition,
 }) => {
   const [selectedInspect, setSelectedInspect] = useState<{ symbol: string; interval: string } | null>(null);
@@ -42,15 +41,18 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
       <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
         <div className="bg-[#111726] border border-slate-800 rounded-xl p-4 flex items-center justify-between">
           <div>
-            <div className="text-xs text-slate-400 font-medium">监控模式</div>
+            <div className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
+              <HeartPulse className="w-3.5 h-3.5 text-rose-400 animate-pulse" />
+              <span>引擎存活与心跳</span>
+            </div>
             <div className="text-sm font-bold text-slate-100 mt-1 flex items-center gap-1.5">
-              {status?.hasBinanceKeys ? (
-                <span className="text-emerald-400 flex items-center gap-1">
-                  <ShieldCheck className="w-4 h-4" /> 币安合约 API 实盘开单
+              {status?.isRunning ? (
+                <span className="text-emerald-400 font-semibold flex items-center gap-1">
+                  🟢 10s 实时高频计算中 (心跳正常)
                 </span>
               ) : (
-                <span className="text-sky-400 flex items-center gap-1">
-                  <Zap className="w-4 h-4" /> 模拟调单与收益观测模式
+                <span className="text-amber-400 font-semibold">
+                  ⏸ 已暂停监控
                 </span>
               )}
             </div>
@@ -58,9 +60,17 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
         </div>
 
         <div className="bg-[#111726] border border-slate-800 rounded-xl p-4">
-          <div className="text-xs text-slate-400 font-medium">监控币种与周期</div>
-          <div className="text-sm font-bold text-amber-400 mt-1">
-            4 币种 (BTC/ETH/SOL/BNB) · 5m / 15m / 30m
+          <div className="text-xs text-slate-400 font-medium">监控模式</div>
+          <div className="text-sm font-bold mt-1">
+            {status?.hasBinanceKeys ? (
+              <span className="text-emerald-400 flex items-center gap-1">
+                <ShieldCheck className="w-4 h-4" /> 币安合约 API 实盘开单
+              </span>
+            ) : (
+              <span className="text-sky-400 flex items-center gap-1">
+                <Zap className="w-4 h-4" /> 模拟调单与收益观测模式
+              </span>
+            )}
           </div>
         </div>
 
@@ -97,8 +107,11 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
         {symbols.map((symbol) => {
           const scanForSymbol = status?.scanResults.filter((s) => s.symbol === symbol) || [];
           const activePosForSymbol = status?.activePositions.find((p) => p.symbol === symbol);
-          const samplePrice = scanForSymbol[0]?.currentPrice || 0;
-          const sample24h = scanForSymbol[0]?.change24hPercent || 0;
+          const sampleScan = scanForSymbol.find((s) => s.interval === '15m') || scanForSymbol[0];
+          const samplePrice = sampleScan?.currentPrice || 0;
+          const sample24h = sampleScan?.change24hPercent || 0;
+          const trendContext = sampleScan?.trendContext || 'RANGE_BOUND';
+          const trendDesc = sampleScan?.trendDescription || '🟡 箱体震荡整理';
 
           return (
             <div
@@ -116,9 +129,23 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
                     {symbol.replace('USDT', '')}
                   </div>
                   <div>
-                    <div className="text-base font-bold text-slate-100">{symbol}</div>
-                    <div className="text-xs text-slate-400 font-mono">
-                      永续合约 · 杠杆 {status?.leverage || 5}x
+                    <div className="text-base font-bold text-slate-100 flex items-center gap-2">
+                      <span>{symbol}</span>
+                    </div>
+                    {/* Live Market Trend Regime Badge */}
+                    <div className="text-xs font-semibold mt-0.5 flex items-center gap-1.5">
+                      <Compass className="w-3.5 h-3.5 text-amber-400" />
+                      <span
+                        className={
+                          trendContext === 'BULL_TREND'
+                            ? 'text-emerald-400'
+                            : trendContext === 'BEAR_TREND'
+                            ? 'text-rose-400'
+                            : 'text-amber-400'
+                        }
+                      >
+                        {trendDesc}
+                      </span>
                     </div>
                   </div>
                 </div>
@@ -177,7 +204,7 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
               {/* 5m, 15m, 30m Timeframe Signal Monitor Status */}
               <div className="space-y-2.5">
                 <div className="text-xs font-semibold text-slate-400">
-                  5m / 15m / 30m 周期实时信号监测:
+                  5m / 15m / 30m 周期实时信号与形态检测:
                 </div>
                 <div className="grid grid-cols-3 gap-2">
                   {timeframes.map((tf) => {
@@ -210,11 +237,11 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
                         <div>
                           {sig === 1 ? (
                             <div className="font-bold text-emerald-400 flex items-center gap-1">
-                              🟢 买入信号: {patName || '形态突破'}
+                              🟢 买入: {patName || '形态突破'}
                             </div>
                           ) : sig === -1 ? (
                             <div className="font-bold text-rose-400 flex items-center gap-1">
-                              🔴 卖出信号: {patName || '形态破位'}
+                              🔴 卖出: {patName || '形态破位'}
                             </div>
                           ) : (
                             <div className="text-slate-400 text-[11px]">⚪ 无触发信号</div>
