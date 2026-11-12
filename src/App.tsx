@@ -5,6 +5,7 @@ import { PositionsAndLogs } from './components/PositionsAndLogs';
 import { SystemLogConsole } from './components/SystemLogConsole';
 import { SettingsPanel } from './components/SettingsPanel';
 import { PnLVolatilityHeatmap } from './components/PnLVolatilityHeatmap';
+import { SelfLearningDashboard } from './components/SelfLearningDashboard';
 import { LoginModal } from './components/LoginModal';
 import { BotStatus } from './server/botEngine';
 
@@ -234,6 +235,10 @@ export default function App() {
             onRefreshStatus={fetchStatus}
             onClosePosition={handleClosePosition}
           />
+        )}
+
+        {activeTab === 'learning' && (
+          <SelfLearningDashboard status={botStatus} />
         )}
 
         {activeTab === 'heatmap' && (

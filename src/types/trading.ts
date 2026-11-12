@@ -136,6 +136,33 @@ export interface LiveEquityPoint {
   activePositionsCount: number;
 }
 
+export interface ServerSystemMetrics {
+  cpuUsagePercent: number;
+  totalMemoryMb: number;
+  freeMemoryMb: number;
+  usedMemoryMb: number;
+  memoryUsagePercent: number;
+  processHeapUsedMb: number;
+  uptimeSeconds: number;
+}
+
+export interface PatternLearningItem {
+  patternType: string;
+  patternName: string;
+  weight: number;
+  confidenceScore: number;
+  totalTrades: number;
+  wins: number;
+  losses: number;
+  winRate: number;
+  avgPnlUsdt: number;
+  totalNetPnlUsdt: number;
+  qualityScoreBoost: number;
+  adaptiveSizingMultiplier: number;
+  status: 'OPTIMAL_HIGH_CONVICTION' | 'LEARNING_ACTIVE' | 'DECAY_PRUNED';
+  lastUpdated: number;
+}
+
 export type VolatilityLevel = 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME';
 
 export interface HeatmapSampleTrade {

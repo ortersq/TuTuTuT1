@@ -3,6 +3,7 @@ import { BotStatus, SymbolScanResult, ActivePosition } from '../server/botEngine
 import { Activity, ShieldCheck, Zap, LineChart, AlertTriangle, Compass, HeartPulse } from 'lucide-react';
 import { CandleChart } from './CandleChart';
 import { LiveEquityChart } from './LiveEquityChart';
+import { ServerSystemDashboard } from './ServerSystemDashboard';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { Kline } from '../types/trading';
 
@@ -102,6 +103,9 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
           <span className="text-[11px] text-sky-300 font-mono">可在设置中填入 API Key 开启实盘</span>
         </div>
       )}
+
+      {/* Server Hardware & Internal Scheduling Dashboard */}
+      <ServerSystemDashboard status={status} />
 
       {/* Live PnL & Equity Line Chart (Recharts) */}
       <LiveEquityChart
