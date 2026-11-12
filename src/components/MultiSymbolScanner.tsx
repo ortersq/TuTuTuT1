@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { BotStatus, SymbolScanResult, ActivePosition } from '../server/botEngine';
 import { Activity, ShieldCheck, Zap, LineChart, AlertTriangle, Compass, HeartPulse } from 'lucide-react';
 import { CandleChart } from './CandleChart';
+import { LiveEquityChart } from './LiveEquityChart';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { Kline } from '../types/trading';
 
@@ -102,6 +103,14 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
         </div>
       )}
 
+      {/* Live PnL & Equity Line Chart (Recharts) */}
+      <LiveEquityChart
+        equityHistory={status?.equityHistory || []}
+        peakEquity={status?.peakEquity}
+        currentEquity={status?.equity}
+        currentBalance={status?.balance}
+      />
+
       {/* Main Multi-Symbol Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
         {symbols.map((symbol) => {
@@ -197,6 +206,15 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
                         {activePosForSymbol.unrealizedPnlPercent.toFixed(1)}%)
                       </strong>
                     </div>
+                    {activePosForSymbol.isTrailingActive && activePosForSymbol.trailingStopPrice && (
+                      <div className="text-emerald-300 font-semibold col-span-2 flex items-center justify-between border-t border-slate-800/80 pt-1 text-[11px]">
+                        <span className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
+                          🚀 移动追踪已激活
+                        </span>
+                        <span>动态止盈线: ${activePosForSymbol.trailingStopPrice.toFixed(2)}</span>
+                      </div>
+                    )}
                   </div>
                 </div>
               )}

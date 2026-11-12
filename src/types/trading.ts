@@ -78,7 +78,10 @@ export interface RiskManagementConfig {
   tpRiskRewardRatio: number;
 
   useTrailingStop: boolean;
+  trailingActivationPercent?: number;
   trailingCallbackPercent: number;
+  trailingStepPercent?: number;
+  trailingActivationUsdt?: number;
 
   sizingMode: PositionSizeMode;
   positionSizePercent: number;
@@ -122,6 +125,50 @@ export interface EquityPoint {
   positionSide: PositionSide;
   unrealizedPnl: number;
   price: number;
+}
+
+export interface LiveEquityPoint {
+  timestamp: number;
+  time: string;
+  equity: number;
+  balance: number;
+  unrealizedPnl: number;
+  activePositionsCount: number;
+}
+
+export type VolatilityLevel = 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME';
+
+export interface HeatmapSampleTrade {
+  id: string;
+  symbol: string;
+  interval: string;
+  side: 'LONG' | 'SHORT';
+  patternName: string;
+  entryPrice: number;
+  exitPrice: number;
+  netPnl: number;
+  peakPnl: number;
+  reversionUsdt: number;
+  exitReason: string;
+  exitTime: number;
+}
+
+export interface HeatmapCellData {
+  hour: number;
+  volatilityLevel: VolatilityLevel;
+  tradesCount: number;
+  winningTrades: number;
+  losingTrades: number;
+  winRate: number;
+  totalNetPnl: number;
+  avgNetPnl: number;
+  avgPeakPnl: number;
+  avgReversion: number;
+  reversionSeverityScore: number;
+  optimalStopLossPattern: string;
+  optimalStopLossDetails: string;
+  dominantExitReason: string;
+  sampleTrades: HeatmapSampleTrade[];
 }
 
 export interface StrategyParams {

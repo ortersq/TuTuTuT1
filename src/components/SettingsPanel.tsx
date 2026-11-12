@@ -1,6 +1,20 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { BotStatus } from '../server/botEngine';
-import { Key, Sliders, Check, Plus, Trash2, Shield, Lock, Terminal } from 'lucide-react';
+import {
+  Key,
+  Sliders,
+  Check,
+  Plus,
+  Trash2,
+  Shield,
+  Zap,
+  TrendingUp,
+  Target,
+  Flame,
+  Info,
+  ShieldCheck,
+  Sparkles,
+} from 'lucide-react';
 
 interface SettingsPanelProps {
   status: BotStatus | null;
@@ -11,6 +25,7 @@ interface SettingsPanelProps {
     monitoredSymbols?: string[];
     monitoredTimeframes?: string[];
     leverage?: number;
+    riskConfig?: any;
   }) => void;
 }
 
@@ -38,6 +53,36 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   );
   const [leverage, setLeverage] = useState<number>(status?.leverage || 5);
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
+
+  // Trailing stop loss configuration state
+  const currentRisk = status?.riskConfig;
+  const [useTrailingStop, setUseTrailingStop] = useState<boolean>(
+    currentRisk?.useTrailingStop ?? true
+  );
+  const [trailingActivationPercent, setTrailingActivationPercent] = useState<number>(
+    currentRisk?.trailingActivationPercent ?? 0.8
+  );
+  const [trailingCallbackPercent, setTrailingCallbackPercent] = useState<number>(
+    currentRisk?.trailingCallbackPercent ?? 0.45
+  );
+  const [trailingStepPercent, setTrailingStepPercent] = useState<number>(
+    currentRisk?.trailingStepPercent ?? 0.5
+  );
+  const [trailingActivationUsdt, setTrailingActivationUsdt] = useState<number>(
+    currentRisk?.trailingActivationUsdt ?? 25
+  );
+  const [trailingSavedSuccess, setTrailingSavedSuccess] = useState<boolean>(false);
+
+  // Sync state if status updates
+  useEffect(() => {
+    if (status?.riskConfig) {
+      setUseTrailingStop(status.riskConfig.useTrailingStop ?? true);
+      setTrailingActivationPercent(status.riskConfig.trailingActivationPercent ?? 0.8);
+      setTrailingCallbackPercent(status.riskConfig.trailingCallbackPercent ?? 0.45);
+      setTrailingStepPercent(status.riskConfig.trailingStepPercent ?? 0.5);
+      setTrailingActivationUsdt(status.riskConfig.trailingActivationUsdt ?? 25);
+    }
+  }, [status?.riskConfig]);
 
   const presetSymbols = [
     'BTCUSDT',
@@ -112,9 +157,300 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setTimeout(() => setSavedSuccess(false), 3000);
   };
 
+  // Trailing stop loss presets
+  const applyPreset = (preset: 'aggressive' | 'balanced' | 'swing') => {
+    if (preset === 'aggressive') {
+      setUseTrailingStop(true);
+      setTrailingActivationPercent(0.5);
+      setTrailingCallbackPercent(0.35);
+      setTrailingStepPercent(0.3);
+      setTrailingActivationUsdt(20);
+    } else if (preset === 'balanced') {
+      setUseTrailingStop(true);
+      setTrailingActivationPercent(0.8);
+      setTrailingCallbackPercent(0.45);
+      setTrailingStepPercent(0.5);
+      setTrailingActivationUsdt(25);
+    } else if (preset === 'swing') {
+      setUseTrailingStop(true);
+      setTrailingActivationPercent(1.5);
+      setTrailingCallbackPercent(0.8);
+      setTrailingStepPercent(0.8);
+      setTrailingActivationUsdt(50);
+    }
+  };
+
+  const handleSaveTrailingStop = () => {
+    onUpdateConfig({
+      riskConfig: {
+        useTrailingStop,
+        trailingActivationPercent,
+        trailingCallbackPercent,
+        trailingStepPercent,
+        trailingActivationUsdt,
+      },
+    });
+    setTrailingSavedSuccess(true);
+    setTimeout(() => setTrailingSavedSuccess(false), 3000);
+  };
+
   return (
     <div className="max-w-4xl mx-auto space-y-6">
-      {/* 1. Dynamic Symbol Maintenance */}
+      {/* 1. Trailing Stop-Loss & Profit Reversion Protection (User Requested Feature) */}
+      <div className="bg-[#111726] border border-amber-500/50 rounded-2xl p-5 space-y-5 shadow-xl shadow-amber-500/5">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <Zap className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <span>移动追踪止盈与防利润回吐风控 (Dynamic Trailing Stop-Loss)</span>
+                <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 font-bold border border-emerald-500/30">
+                  彻底解决倒亏痛点
+                </span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                当价格顺势推演盈利时，动态追踪线上拉锁定收益；行情回撤时坚决自动平仓，严防 +$30~+$80 浮盈回吐为负！
+              </p>
+            </div>
+          </div>
+
+          {/* Toggle Switch */}
+          <div className="flex items-center gap-2.5 bg-[#0b0e14] px-3 py-1.5 rounded-xl border border-slate-800">
+            <span className="text-xs font-semibold text-slate-300">移动追踪总开关:</span>
+            <button
+              type="button"
+              onClick={() => setUseTrailingStop(!useTrailingStop)}
+              className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                useTrailingStop ? 'bg-amber-400' : 'bg-slate-700'
+              }`}
+            >
+              <div
+                className={`bg-slate-950 w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                  useTrailingStop ? 'translate-x-6' : 'translate-x-0'
+                }`}
+              />
+            </button>
+            <span
+              className={`text-xs font-mono font-bold ${
+                useTrailingStop ? 'text-amber-400' : 'text-slate-500'
+              }`}
+            >
+              {useTrailingStop ? '已开启' : '已关闭'}
+            </span>
+          </div>
+        </div>
+
+        {/* Preset Buttons */}
+        <div className="space-y-1.5">
+          <div className="flex items-center justify-between text-xs">
+            <span className="font-semibold text-slate-300 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-amber-400" />
+              <span>一键快速应用策略预设:</span>
+            </span>
+            <span className="text-[11px] text-slate-400">点击自动填充推荐参数</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+            <button
+              type="button"
+              onClick={() => applyPreset('aggressive')}
+              className="p-3 bg-[#0b0e14] hover:bg-slate-800/80 border border-rose-500/30 rounded-xl text-left transition-all cursor-pointer group"
+            >
+              <div className="text-xs font-bold text-rose-300 group-hover:text-rose-200 flex items-center justify-between">
+                <span>🏎️ 敏捷防插针型 (激进)</span>
+                <span className="text-[10px] font-mono text-slate-400">0.5% / 0.35%</span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                浮盈超 0.5% 即刻激活保本，回撤 0.35% 坚决锁利，专治美盘极端插针回吐！
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyPreset('balanced')}
+              className="p-3 bg-amber-500/10 hover:bg-amber-500/15 border border-amber-500/50 rounded-xl text-left transition-all cursor-pointer group"
+            >
+              <div className="text-xs font-bold text-amber-300 group-hover:text-amber-200 flex items-center justify-between">
+                <span>⚖️ 稳健推荐型 (标准)</span>
+                <span className="text-[10px] font-mono text-amber-400 font-bold">0.8% / 0.45%</span>
+              </div>
+              <div className="text-[11px] text-slate-300 mt-1">
+                兼顾利润充分奔跑冲刺与回撤防守，浮盈达 +$25 稳稳锁定成本，官方推荐。
+              </div>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => applyPreset('swing')}
+              className="p-3 bg-[#0b0e14] hover:bg-slate-800/80 border border-cyan-500/30 rounded-xl text-left transition-all cursor-pointer group"
+            >
+              <div className="text-xs font-bold text-cyan-300 group-hover:text-cyan-200 flex items-center justify-between">
+                <span>🚀 单边宽幅波段型 (顺势)</span>
+                <span className="text-[10px] font-mono text-slate-400">1.5% / 0.80%</span>
+              </div>
+              <div className="text-[11px] text-slate-400 mt-1">
+                容忍正常波幅洗盘，冲高 1.5% 后启动宽步长追踪，搏取 2.5x 以上超额盈亏比。
+              </div>
+            </button>
+          </div>
+        </div>
+
+        {/* Detailed Slider Controls */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">
+          {/* Activation Threshold */}
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <Target className="w-4 h-4 text-amber-400" />
+                <span>1. 追踪激活阈值 (Activation Threshold)</span>
+              </label>
+              <span className="text-sm font-bold text-amber-400 font-mono">
+                {trailingActivationPercent.toFixed(2)}%
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min="0.2"
+              max="3.0"
+              step="0.05"
+              value={trailingActivationPercent}
+              onChange={(e) => setTrailingActivationPercent(parseFloat(e.target.value))}
+              disabled={!useTrailingStop}
+              className="w-full accent-amber-400 cursor-pointer disabled:opacity-50"
+            />
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>高灵敏 0.2%</span>
+              <span className="text-slate-500 font-mono">当前: +{trailingActivationPercent}% 激活</span>
+              <span>宽容度 3.0%</span>
+            </div>
+
+            <div className="text-[11px] text-slate-400 leading-relaxed pt-1 border-t border-slate-800/60">
+              💡 当行情顺势推动，未结收益率达到 <strong>+{trailingActivationPercent}%</strong> 时，移动追踪正式激活，系统<strong>瞬间将止损线移至成本保本价</strong>，消除亏损可能！
+            </div>
+          </div>
+
+          {/* Step Distance / Callback Distance */}
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                <span>2. 回撤回调步长 (Step Distance / Callback)</span>
+              </label>
+              <span className="text-sm font-bold text-emerald-400 font-mono">
+                {trailingCallbackPercent.toFixed(2)}%
+              </span>
+            </div>
+
+            <input
+              type="range"
+              min="0.15"
+              max="2.0"
+              step="0.05"
+              value={trailingCallbackPercent}
+              onChange={(e) => setTrailingCallbackPercent(parseFloat(e.target.value))}
+              disabled={!useTrailingStop}
+              className="w-full accent-emerald-400 cursor-pointer disabled:opacity-50"
+            />
+
+            <div className="flex items-center justify-between text-[11px] text-slate-400">
+              <span>极紧密 0.15%</span>
+              <span className="text-slate-500 font-mono">当前: 回调 {trailingCallbackPercent}% 平仓</span>
+              <span>宽松 2.0%</span>
+            </div>
+
+            <div className="text-[11px] text-slate-400 leading-relaxed pt-1 border-t border-slate-800/60">
+              💡 价格创出新高后，若发生回落并触碰到 <strong>-{trailingCallbackPercent}%</strong> 动态防守线，系统立即市价平仓锁定净利润，<strong>杜绝利润回吐</strong>！
+            </div>
+          </div>
+        </div>
+
+        {/* Secondary USDT Safety Lock */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+              <span>资金维度激活点 (USDT Profit Trigger)</span>
+              <span className="text-sm font-bold font-mono text-cyan-400">${trailingActivationUsdt} USDT</span>
+            </div>
+            <input
+              type="range"
+              min="10"
+              max="80"
+              step="5"
+              value={trailingActivationUsdt}
+              onChange={(e) => setTrailingActivationUsdt(parseInt(e.target.value, 10))}
+              disabled={!useTrailingStop}
+              className="w-full accent-cyan-400 cursor-pointer disabled:opacity-50"
+            />
+            <div className="text-[11px] text-slate-400">
+              无论涨幅多少，单笔持仓浮盈只要触及 <strong>${trailingActivationUsdt} USDT</strong>，强制触发保本防线。
+            </div>
+          </div>
+
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between text-xs font-semibold text-slate-300">
+              <span>动态阶梯步进 (Rachet Step Distance)</span>
+              <span className="text-sm font-bold font-mono text-amber-400">{trailingStepPercent.toFixed(2)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.2"
+              max="1.5"
+              step="0.05"
+              value={trailingStepPercent}
+              onChange={(e) => setTrailingStepPercent(parseFloat(e.target.value))}
+              disabled={!useTrailingStop}
+              className="w-full accent-amber-400 cursor-pointer disabled:opacity-50"
+            />
+            <div className="text-[11px] text-slate-400">
+              行情每进一步推进 <strong>{trailingStepPercent}%</strong>，防守线相应上提一级，只进不退。
+            </div>
+          </div>
+        </div>
+
+        {/* Visual Live Demonstration Card */}
+        <div className="p-3.5 bg-slate-900/60 border border-slate-800 rounded-xl text-xs space-y-1.5">
+          <div className="text-slate-300 font-semibold flex items-center gap-1.5">
+            <Info className="w-3.5 h-3.5 text-amber-400" />
+            <span>当前参数实盘推演效果举例 (基于 BTC 当前 $68,000 做多开仓):</span>
+          </div>
+          <div className="grid grid-cols-1 sm:grid-cols-3 gap-2 text-[11px] font-mono pt-1 text-slate-300">
+            <div className="bg-[#0b0e14] p-2 rounded border border-slate-800">
+              <span className="text-slate-500 block">1. 激活阶段</span>
+              价格达到 <strong className="text-amber-400">${(68000 * (1 + trailingActivationPercent / 100)).toFixed(1)}</strong> (+{trailingActivationPercent}%)，止损立即提到成本 $68,102，实现 0 亏损风险。
+            </div>
+            <div className="bg-[#0b0e14] p-2 rounded border border-slate-800">
+              <span className="text-slate-500 block">2. 冲高追踪</span>
+              若冲至 <strong className="text-emerald-400">$69,200</strong>，动态保护线自动提至 <strong className="text-emerald-300">${(69200 * (1 - trailingCallbackPercent / 100)).toFixed(1)}</strong>。
+            </div>
+            <div className="bg-[#0b0e14] p-2 rounded border border-slate-800">
+              <span className="text-slate-500 block">3. 自动锁利</span>
+              行情插针回踩触及保护线即刻平仓，<strong className="text-emerald-400">稳稳锁定 +$70 USDT 利润</strong>，告别倒亏！
+            </div>
+          </div>
+        </div>
+
+        {/* Save Trailing Stop Button */}
+        <div className="pt-2 border-t border-slate-800 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSaveTrailingStop}
+            className="px-6 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-sm flex items-center gap-1.5"
+          >
+            <Check className="w-4 h-4" />
+            <span>保存并应用移动追踪止盈参数</span>
+          </button>
+          {trailingSavedSuccess && (
+            <span className="text-xs text-emerald-400 font-medium">
+              ✓ 移动追踪止损参数已即刻同步至策略引擎！
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 2. Dynamic Symbol Maintenance */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -196,7 +532,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       </div>
 
-      {/* 2. Front-End Binance API Key Management */}
+      {/* 3. Front-End Binance API Key Management */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -267,7 +603,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </form>
       </div>
 
-      {/* 3. Timeframes & Leverage Configuration */}
+      {/* 4. Timeframes & Leverage Configuration */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-5">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
@@ -320,6 +656,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
 
         <div className="pt-2 border-t border-slate-800 flex items-center gap-3">
           <button
+            type="button"
             onClick={handleSaveTimeframesAndLeverage}
             className="px-6 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-sm"
           >

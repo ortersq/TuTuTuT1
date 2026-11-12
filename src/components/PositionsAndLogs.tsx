@@ -1,6 +1,7 @@
 import React from 'react';
 import { BotStatus, ActivePosition, BotTradeRecord, PatternStatItem } from '../server/botEngine';
-import { ShieldAlert, TrendingUp, Sparkles, AlertCircle, CheckCircle, ShieldCheck } from 'lucide-react';
+import { ShieldAlert, TrendingUp, Sparkles, AlertCircle, CheckCircle, ShieldCheck, Flame } from 'lucide-react';
+import { LiveEquityChart } from './LiveEquityChart';
 
 interface PositionsAndLogsProps {
   status: BotStatus | null;
@@ -132,11 +133,32 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                     {pos.unrealizedPnlPercent.toFixed(2)}%)
                   </strong>
                 </div>
+
+                {/* Trailing Stop-Loss Dynamic Protection Badge */}
+                {pos.isTrailingActive && pos.trailingStopPrice && (
+                  <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs flex items-center justify-between text-emerald-300 font-mono">
+                    <span className="flex items-center gap-1.5 font-sans font-bold">
+                      <span className="w-2 h-2 rounded-full bg-emerald-400 animate-ping inline-block" />
+                      🚀 移动追踪已激活 (保本已锁定)
+                    </span>
+                    <span>
+                      动态防守线: <strong>${pos.trailingStopPrice.toFixed(2)}</strong> (最高: ${pos.trailingPeakPrice.toFixed(2)})
+                    </span>
+                  </div>
+                )}
               </div>
             ))}
           </div>
         )}
       </div>
+
+      {/* Live Equity & Floating PnL Curve */}
+      <LiveEquityChart
+        equityHistory={status?.equityHistory || []}
+        peakEquity={status?.peakEquity}
+        currentEquity={status?.equity}
+        currentBalance={status?.balance}
+      />
 
       {/* 2. Pattern Win-Rate Statistics & Auto-Optimization Leaderboard */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
@@ -278,6 +300,16 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
           </div>
         </div>
 
+        {/* Heatmap Quick Diagnostic Notice */}
+        <div className="p-3 bg-rose-500/10 border border-rose-500/30 rounded-xl text-xs text-rose-200 flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <Flame className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>
+              <strong>已开启波动率与利润回吐多维热力分析</strong>：系统自动追踪每笔调单的「盘中最高冲高浮盈」与「回吐金额」，可在上方<strong>「波动与回吐热力」</strong>标签页查看全天 24h × 4 层级热力图与最优止损策略！
+            </span>
+          </div>
+        </div>
+
         {/* Trade History Table */}
         {closedTrades.length === 0 ? (
           <div className="py-10 text-center text-slate-400 text-xs">
@@ -295,8 +327,10 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                   <th className="py-2.5 px-3">形态名称</th>
                   <th className="py-2.5 px-3">开仓价</th>
                   <th className="py-2.5 px-3">平仓价</th>
+                  <th className="py-2.5 px-3 text-right">盘中最高浮盈</th>
+                  <th className="py-2.5 px-3 text-right">回吐金额</th>
                   <th className="py-2.5 px-3">平仓原因</th>
-                  <th className="py-2.5 px-3 text-right">净盈亏</th>
+                  <th className="py-2.5 px-3 text-right">最终净盈亏</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-800/60 font-mono">
@@ -326,6 +360,16 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                       <td className="py-2.5 px-3 text-amber-300">{t.patternName}</td>
                       <td className="py-2.5 px-3 text-slate-300">${t.entryPrice.toFixed(2)}</td>
                       <td className="py-2.5 px-3 text-slate-300">${t.exitPrice.toFixed(2)}</td>
+                      <td className="py-2.5 px-3 text-right text-emerald-400 font-bold">
+                        {t.peakPnlUsdt !== undefined && t.peakPnlUsdt > 0
+                          ? `+$${t.peakPnlUsdt.toFixed(2)}`
+                          : '--'}
+                      </td>
+                      <td className="py-2.5 px-3 text-right text-rose-400 font-bold">
+                        {t.reversionUsdt !== undefined && t.reversionUsdt > 0
+                          ? `-$${t.reversionUsdt.toFixed(2)}`
+                          : '$0.00'}
+                      </td>
                       <td className="py-2.5 px-3 text-slate-400">{t.exitReason}</td>
                       <td
                         className={`py-2.5 px-3 text-right font-bold ${

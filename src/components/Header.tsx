@@ -1,7 +1,7 @@
 import React from 'react';
-import { Activity, Shield, ListOrdered, Terminal, Play, Pause, Key, LogOut } from 'lucide-react';
+import { Activity, Shield, ListOrdered, Terminal, Play, Pause, Key, LogOut, Flame } from 'lucide-react';
 
-export type ActiveTab = 'monitor' | 'positions' | 'logs' | 'settings';
+export type ActiveTab = 'monitor' | 'heatmap' | 'positions' | 'logs' | 'settings';
 
 interface HeaderProps {
   activeTab: ActiveTab;
@@ -62,6 +62,18 @@ export const Header: React.FC<HeaderProps> = ({
         >
           <Activity className="w-3.5 h-3.5" />
           <span>多币种 5m/15m/30m 监控中心</span>
+        </button>
+
+        <button
+          onClick={() => setActiveTab('heatmap')}
+          className={`flex items-center gap-1.5 transition-colors whitespace-nowrap py-1 cursor-pointer ${
+            activeTab === 'heatmap'
+              ? 'text-amber-400 font-semibold border-b-2 border-amber-400'
+              : 'hover:text-slate-200'
+          }`}
+        >
+          <Flame className="w-3.5 h-3.5 text-rose-400" />
+          <span>波动与回吐热力</span>
         </button>
 
         <button

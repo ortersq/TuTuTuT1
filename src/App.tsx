@@ -4,6 +4,7 @@ import { MultiSymbolScanner } from './components/MultiSymbolScanner';
 import { PositionsAndLogs } from './components/PositionsAndLogs';
 import { SystemLogConsole } from './components/SystemLogConsole';
 import { SettingsPanel } from './components/SettingsPanel';
+import { PnLVolatilityHeatmap } from './components/PnLVolatilityHeatmap';
 import { LoginModal } from './components/LoginModal';
 import { BotStatus } from './server/botEngine';
 
@@ -184,6 +185,7 @@ export default function App() {
     monitoredSymbols?: string[];
     monitoredTimeframes?: string[];
     leverage?: number;
+    riskConfig?: any;
   }) => {
     if (!authToken) return;
     try {
@@ -231,6 +233,13 @@ export default function App() {
             status={botStatus}
             onRefreshStatus={fetchStatus}
             onClosePosition={handleClosePosition}
+          />
+        )}
+
+        {activeTab === 'heatmap' && (
+          <PnLVolatilityHeatmap
+            closedTrades={botStatus?.closedTrades || []}
+            monitoredSymbols={botStatus?.monitoredSymbols}
           />
         )}
 

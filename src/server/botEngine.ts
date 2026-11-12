@@ -46,6 +46,8 @@ export interface ActivePosition {
   stopLossPrice: number | null;
   takeProfitPrice: number | null;
   trailingPeakPrice: number;
+  trailingStopPrice?: number | null;
+  isTrailingActive?: boolean;
   liquidationPrice: number;
   strategyUsed: StrategyKey;
   binanceOrderId?: string;
@@ -70,6 +72,9 @@ export interface BotTradeRecord {
   marginUsed: number;
   netPnl: number;
   pnlPercent: number;
+  peakPnlUsdt?: number;
+  reversionUsdt?: number;
+  volatilityLevel?: 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME';
   exitReason: ExitReason;
   strategyUsed: StrategyKey;
   isPaper: boolean;
@@ -116,6 +121,15 @@ export interface PatternStatItem {
   status: 'ACTIVE_HIGH_CONVICTION' | 'ACTIVE_NORMAL' | 'PAUSED_LOW_WINRATE';
 }
 
+export interface LiveEquityPoint {
+  timestamp: number;
+  time: string;
+  equity: number;
+  balance: number;
+  unrealizedPnl: number;
+  activePositionsCount: number;
+}
+
 export interface BotStatus {
   isRunning: boolean;
   mode: 'PAPER' | 'LIVE';
@@ -132,6 +146,7 @@ export interface BotStatus {
   closedTrades: BotTradeRecord[];
   scanResults: SymbolScanResult[];
   patternStats: PatternStatItem[];
+  equityHistory: LiveEquityPoint[];
   logs: LogEntry[];
   lastUpdateTime: number;
   riskConfig: RiskManagementConfig;
@@ -154,6 +169,8 @@ class TradingEngine {
   private activePositions: ActivePosition[] = [];
   private closedTrades: BotTradeRecord[] = [];
   private scanResults: SymbolScanResult[] = [];
+  private patternStats: PatternStatItem[] = [];
+  private equityHistory: LiveEquityPoint[] = [];
   private logs: LogEntry[] = [];
   private lastUpdateTime: number = Date.now();
   private cycleCounter: number = 0;
@@ -166,7 +183,10 @@ class TradingEngine {
     tpPercent: 3.5,
     tpRiskRewardRatio: 2.2,
     useTrailingStop: true,
-    trailingCallbackPercent: 1.0,
+    trailingActivationPercent: 0.8,
+    trailingCallbackPercent: 0.45,
+    trailingStepPercent: 0.5,
+    trailingActivationUsdt: 25,
     sizingMode: 'EQUITY_PERCENT',
     positionSizePercent: 20,
     fixedAmountUSDT: 1000,
@@ -182,6 +202,14 @@ class TradingEngine {
   constructor() {
     const hasKeys = this.hasApiCredentials();
     this.mode = hasKeys ? 'LIVE' : 'PAPER';
+    this.equityHistory.push({
+      timestamp: Date.now(),
+      time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+      equity: this.equity,
+      balance: this.balance,
+      unrealizedPnl: 0,
+      activePositionsCount: 0,
+    });
     this.addLog(
       'info',
       'SYSTEM',
@@ -497,6 +525,7 @@ class TradingEngine {
       closedTrades: this.closedTrades.slice(-50),
       scanResults: this.scanResults,
       patternStats: this.computePatternStats(),
+      equityHistory: [...this.equityHistory],
       logs: [...this.logs],
       lastUpdateTime: this.lastUpdateTime,
       riskConfig: this.riskConfig,
@@ -801,20 +830,67 @@ class TradingEngine {
                 else if (pos.side === 'SHORT' && currentPrice <= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
               }
 
-              // 7. Dynamic Trailing Profit Protection (高灵敏移动追踪止盈: 回撤达到 0.4%~0.6% 锁利)
+              // 7. Dynamic Trailing Stop-Loss Feature (用户可配置激活阈值 & 步进距离)
               if (!exitTriggered && this.riskConfig.useTrailingStop) {
-                // 只要价格上涨超过 0.6%，就启动高灵敏追踪，允许回撤 0.45%
-                const triggerThreshold = 0.006;
-                const callbackRate = 0.0045;
+                const activationRate = (this.riskConfig.trailingActivationPercent ?? 0.8) / 100;
+                const callbackRate = (this.riskConfig.trailingCallbackPercent ?? 0.45) / 100;
+                const activationUsdt = this.riskConfig.trailingActivationUsdt ?? 25;
+
+                let gainRate = 0;
                 if (pos.side === 'LONG') {
-                  const gain = (pos.trailingPeakPrice - pos.entryPrice) / pos.entryPrice;
-                  if (gain >= triggerThreshold && currentPrice <= pos.trailingPeakPrice * (1 - callbackRate)) {
-                    exitTriggered = 'TRAILING_STOP';
-                  }
+                  gainRate = (pos.trailingPeakPrice - pos.entryPrice) / pos.entryPrice;
                 } else {
-                  const gain = (pos.entryPrice - pos.trailingPeakPrice) / pos.entryPrice;
-                  if (gain >= triggerThreshold && currentPrice >= pos.trailingPeakPrice * (1 + callbackRate)) {
-                    exitTriggered = 'TRAILING_STOP';
+                  gainRate = (pos.entryPrice - pos.trailingPeakPrice) / pos.entryPrice;
+                }
+
+                // Check activation condition (gain reaches activation percent or floating profit reaches USDT threshold)
+                if (gainRate >= activationRate || (pos.peakPnlUsdt && pos.peakPnlUsdt >= activationUsdt)) {
+                  if (!pos.isTrailingActive) {
+                    pos.isTrailingActive = true;
+                    // Immediately elevate stop line to Breakeven (+0.15% fee buffer for long, -0.15% for short)
+                    const breakevenPrice =
+                      pos.side === 'LONG' ? pos.entryPrice * 1.0015 : pos.entryPrice * 0.9985;
+                    pos.trailingStopPrice = breakevenPrice;
+                    this.addLog(
+                      'success',
+                      'ORDER',
+                      `🚀 [${symbol} ${pos.interval}] 移动追踪已激活 (顺势涨跌 ${(gainRate * 100).toFixed(2)}% / 浮盈 $${pos.peakPnlUsdt?.toFixed(1) || 0} USDT)！动态止损锁定至成本保本价 $${breakevenPrice.toFixed(2)}，杜绝倒亏！`,
+                      symbol
+                    );
+                  }
+
+                  if (pos.side === 'LONG') {
+                    // Rachet stop higher as price makes new highs
+                    const candidateStop = pos.trailingPeakPrice * (1 - callbackRate);
+                    if (pos.trailingStopPrice === null || pos.trailingStopPrice === undefined || candidateStop > pos.trailingStopPrice) {
+                      pos.trailingStopPrice = candidateStop;
+                    }
+
+                    if (currentPrice <= pos.trailingStopPrice) {
+                      exitTriggered = 'TRAILING_STOP';
+                      this.addLog(
+                        'success',
+                        'ORDER',
+                        `💰 [${symbol} ${pos.interval} 移动追踪平仓锁利] 价格从最高峰值 $${pos.trailingPeakPrice.toFixed(2)} 回撤触及动态止盈线 $${pos.trailingStopPrice.toFixed(2)} (回撤 ${(callbackRate * 100).toFixed(2)}%)，锁定盈利 +$${pos.unrealizedPnl.toFixed(2)} USDT！`,
+                        symbol
+                      );
+                    }
+                  } else {
+                    // Short
+                    const candidateStop = pos.trailingPeakPrice * (1 + callbackRate);
+                    if (pos.trailingStopPrice === null || pos.trailingStopPrice === undefined || candidateStop < pos.trailingStopPrice) {
+                      pos.trailingStopPrice = candidateStop;
+                    }
+
+                    if (currentPrice >= pos.trailingStopPrice) {
+                      exitTriggered = 'TRAILING_STOP';
+                      this.addLog(
+                        'success',
+                        'ORDER',
+                        `💰 [${symbol} ${pos.interval} 移动追踪平仓锁利] 价格从最低谷值 $${pos.trailingPeakPrice.toFixed(2)} 反弹触及动态止盈线 $${pos.trailingStopPrice.toFixed(2)} (回撤 ${(callbackRate * 100).toFixed(2)}%)，锁定盈利 +$${pos.unrealizedPnl.toFixed(2)} USDT！`,
+                        symbol
+                      );
+                    }
                   }
                 }
               }
@@ -1005,6 +1081,8 @@ class TradingEngine {
                   stopLossPrice,
                   takeProfitPrice,
                   trailingPeakPrice: currentPrice,
+                  trailingStopPrice: null,
+                  isTrailingActive: false,
                   liquidationPrice: Math.max(0, liqPrice),
                   strategyUsed: 'pattern_price_action',
                   binanceOrderId,
@@ -1061,6 +1139,18 @@ class TradingEngine {
       }
       this.equity = Math.max(0, this.balance + totalUnrealizedPnl);
       if (this.equity > this.peakEquity) this.peakEquity = this.equity;
+
+      this.equityHistory.push({
+        timestamp: Date.now(),
+        time: new Date().toLocaleTimeString('zh-CN', { hour12: false }),
+        equity: Number(this.equity.toFixed(2)),
+        balance: Number(this.balance.toFixed(2)),
+        unrealizedPnl: Number(totalUnrealizedPnl.toFixed(2)),
+        activePositionsCount: this.activePositions.length,
+      });
+      if (this.equityHistory.length > 180) {
+        this.equityHistory.shift();
+      }
     } catch (err: any) {
       this.addLog('error', 'SYSTEM', `监控循环处理异常: ${err.message || '网络连接中断'}`);
     } finally {
@@ -1106,6 +1196,14 @@ class TradingEngine {
     this.balance += pos.marginUsed + netPnl;
     this.equity = this.balance;
 
+    const peakPnl = pos.peakPnlUsdt || 0;
+    const reversionUsdt = peakPnl > 0 ? Math.max(0, peakPnl - netPnl) : 0;
+    const priceDeltaPercent = Math.abs((exitPrice - pos.entryPrice) / pos.entryPrice) * 100;
+    let volatilityLevel: 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME' = 'NORMAL';
+    if (priceDeltaPercent >= 3.0) volatilityLevel = 'EXTREME';
+    else if (priceDeltaPercent >= 1.8) volatilityLevel = 'HIGH';
+    else if (priceDeltaPercent < 0.9) volatilityLevel = 'LOW';
+
     const tradeRecord: BotTradeRecord = {
       id: pos.id,
       symbol: pos.symbol,
@@ -1122,6 +1220,9 @@ class TradingEngine {
       marginUsed: pos.marginUsed,
       netPnl,
       pnlPercent,
+      peakPnlUsdt: peakPnl,
+      reversionUsdt,
+      volatilityLevel,
       exitReason,
       strategyUsed: pos.strategyUsed,
       isPaper: pos.isPaper,
