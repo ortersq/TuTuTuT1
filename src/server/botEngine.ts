@@ -1019,6 +1019,18 @@ class TradingEngine {
         await this.syncBinanceFuturesBalance();
       }
 
+      // ZERO-TOUCH AUTO-EVOLUTION: Automatically absorb AI Diagnostic Recommended Timeframe into scanning pool!
+      const diagnostic = this.getTimeframeDiagnosticReport();
+      const recTf = diagnostic.recommendedTimeframe;
+      if (recTf && !this.monitoredTimeframes.includes(recTf) && ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'].includes(recTf)) {
+        this.monitoredTimeframes.push(recTf);
+        this.addLog(
+          'info',
+          'SYSTEM',
+          `🤖 【全自动无感进化】系统诊断自动吸收【${recTf}】为当前最佳黄金分析周期，已自动载入监控引擎！`
+        );
+      }
+
       const updatedScans: SymbolScanResult[] = [];
 
       for (const symbol of this.monitoredSymbols) {
