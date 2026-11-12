@@ -1,7 +1,7 @@
 import React from 'react';
 import { BotStatus } from '../server/botEngine';
 import { PatternLearningItem } from '../types/trading';
-import { Brain, Cpu, TrendingUp, ShieldCheck, Zap, Award, BarChart3, AlertCircle } from 'lucide-react';
+import { Brain, Cpu, TrendingUp, ShieldCheck, Zap, Award, BarChart3, AlertCircle, Clock, Calendar } from 'lucide-react';
 
 interface SelfLearningDashboardProps {
   status: BotStatus | null;
@@ -72,7 +72,7 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
 
   // Filter self-learning logs
   const learningLogs = (status?.logs || []).filter(
-    (l) => l.message.includes('自学习') || l.message.includes('强化') || l.message.includes('权重')
+    (l) => l.message.includes('自学习') || l.message.includes('强化') || l.message.includes('权重') || l.message.includes('时段')
   );
 
   return (
@@ -88,14 +88,14 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
             <div>
               <div className="flex items-center gap-2">
                 <h2 className="text-lg font-bold text-white tracking-tight">
-                  强化自适应学习进化控制台 (Online Reinforcement Learning)
+                  多维时空强化自适应自学习进化控制台 (Multi-Timeframe & Session Slicing AI)
                 </h2>
                 <span className="px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 text-[11px] font-semibold border border-amber-500/30">
-                  第 #{generation} 代在线强化模型
+                  第 #{generation} 代多维强化模型
                 </span>
               </div>
               <p className="text-xs text-slate-400 mt-1">
-                基于指数移动平均 (EMA Reward Updates) 实时调控 K线形态权重，运行时间越长，形态分析越精准，特化胜率与盈利能力越高。
+                已深度兼顾<strong>不同 K线周期 (5m/15m/30m)</strong> 与<strong>不同 24h 交易时段 (亚盘/欧盘/美盘/尾盘)</strong> 的形态胜率差异！自动微调信号质量分加成与仓位乘数。
               </p>
             </div>
           </div>
@@ -106,7 +106,7 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
               <div className="text-base font-bold text-emerald-400 mt-0.5">{highConvictionCount} 个</div>
             </div>
             <div className="text-center px-3 border-r border-slate-800">
-              <div className="text-[10px] text-slate-400 uppercase tracking-wider">剪枝拦截形态</div>
+              <div className="text-[10px] text-slate-400 uppercase tracking-wider">剪枝/时段防护</div>
               <div className="text-base font-bold text-rose-400 mt-0.5">{activePrunedCount} 个</div>
             </div>
             <div className="text-center px-3">
@@ -128,7 +128,7 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
           <div>
             <div className="text-[11px] text-slate-400">自学习迭代世代</div>
             <div className="text-lg font-bold text-white mt-0.5">#{generation} 世代</div>
-            <div className="text-[10px] text-sky-400 mt-0.5">平仓即触发权重微调</div>
+            <div className="text-[10px] text-sky-400 mt-0.5">多维时空离散切片</div>
           </div>
         </div>
 
@@ -149,23 +149,23 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
 
         <div className="bg-[#0e131f] border border-slate-800 rounded-xl p-4 flex items-center gap-3.5">
           <div className="p-2.5 rounded-lg bg-amber-500/10 text-amber-400 border border-amber-500/20">
-            <ShieldCheck className="w-5 h-5" />
+            <Clock className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-[11px] text-slate-400">智能仓位调控范围</div>
-            <div className="text-lg font-bold text-amber-400 mt-0.5">0.40x ~ 1.50x</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">高信心放大，低信心缩减</div>
+            <div className="text-[11px] text-slate-400">交易时段离散分维</div>
+            <div className="text-lg font-bold text-amber-400 mt-0.5">亚 / 欧 / 美 / 尾盘</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">避开低效陷阱时段</div>
           </div>
         </div>
 
         <div className="bg-[#0e131f] border border-slate-800 rounded-xl p-4 flex items-center gap-3.5">
           <div className="p-2.5 rounded-lg bg-purple-500/10 text-purple-400 border border-purple-500/20">
-            <BarChart3 className="w-5 h-5" />
+            <Calendar className="w-5 h-5" />
           </div>
           <div>
-            <div className="text-[11px] text-slate-400">信号质量分动态修正</div>
-            <div className="text-lg font-bold text-purple-300 mt-0.5">-25分 ~ +15分</div>
-            <div className="text-[10px] text-slate-400 mt-0.5">自动修正图形质量评级</div>
+            <div className="text-[11px] text-slate-400">K线周期独立特化</div>
+            <div className="text-lg font-bold text-purple-300 mt-0.5">5m / 15m / 30m</div>
+            <div className="text-[10px] text-slate-400 mt-0.5">周期离散加权控制</div>
           </div>
         </div>
       </div>
@@ -175,10 +175,10 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
         <div className="px-5 py-4 bg-slate-900/60 border-b border-slate-800 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <Brain className="w-4 h-4 text-amber-400" />
-            <h3 className="text-sm font-bold text-white">K线形态强化学习权重矩阵 (Pattern Weight Matrix)</h3>
+            <h3 className="text-sm font-bold text-white">多维时空 K线形态强化学习矩阵 (Multi-Dimensional Weight Matrix)</h3>
           </div>
           <span className="text-[11px] text-slate-400">
-            100% 真实交易日志强化反馈 | 动态衰减 & 爆炸拉升机制
+            兼顾不同周期 (5m/15m/30m) 与 24h 交易时段 (亚/欧/美盘) 的胜率差异
           </span>
         </div>
 
@@ -187,8 +187,10 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
             <thead className="bg-slate-950/80 text-[11px] font-semibold text-slate-400 uppercase tracking-wider border-b border-slate-800">
               <tr>
                 <th className="px-4 py-3">形态名称 & 代码</th>
-                <th className="px-4 py-3">学习权重 (EMA Weight)</th>
-                <th className="px-4 py-3">信念得分 (0-100)</th>
+                <th className="px-4 py-3">综合权重</th>
+                <th className="px-4 py-3">信念得分</th>
+                <th className="px-4 py-3">最佳黄金周期</th>
+                <th className="px-4 py-3">最佳黄金交易时段</th>
                 <th className="px-4 py-3">实盘胜率 & 损益</th>
                 <th className="px-4 py-3">质量分加成</th>
                 <th className="px-4 py-3">仓位乘数</th>
@@ -198,8 +200,8 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
             <tbody className="divide-y divide-slate-800/60">
               {stats.length === 0 ? (
                 <tr>
-                  <td colSpan={7} className="px-4 py-8 text-center text-slate-500 text-xs">
-                    正在初始化形态强化学习矩阵...
+                  <td colSpan={9} className="px-4 py-8 text-center text-slate-500 text-xs">
+                    正在初始化多维形态强化学习矩阵...
                   </td>
                 </tr>
               ) : (
@@ -215,7 +217,7 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
                       </span>
                     </td>
                     <td className="px-4 py-3">
-                      <div className="flex items-center gap-2 max-w-[120px]">
+                      <div className="flex items-center gap-2 max-w-[100px]">
                         <div className="flex-1 bg-slate-800 h-2 rounded-full overflow-hidden">
                           <div
                             className={`h-full transition-all duration-500 ${
@@ -232,6 +234,12 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
                           {item.confidenceScore}分
                         </span>
                       </div>
+                    </td>
+                    <td className="px-4 py-3 font-mono font-semibold text-purple-300">
+                      {item.bestTimeframe || '15m'}
+                    </td>
+                    <td className="px-4 py-3 font-mono font-semibold text-amber-300">
+                      {item.bestSession || '美盘高波爆发'}
                     </td>
                     <td className="px-4 py-3">
                       {item.totalTrades === 0 ? (
@@ -269,37 +277,40 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
 
       {/* Mechanism Deep Dive & Event Stream Grid */}
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-        {/* Card 1: Core Mechanics */}
+        {/* Card 1: Multi-Dimensional Slicing Explanation */}
         <div className="bg-[#0e131f] border border-slate-800 rounded-xl p-5 space-y-4 shadow-lg">
           <div className="flex items-center gap-2 text-white font-bold text-sm">
             <Zap className="w-4 h-4 text-amber-400" />
-            <span>自学习进化核心机制 (Adaptive Reinforcement Logic)</span>
+            <span>多维时空离散分维机制 (Multi-Dimensional Slicing Logic)</span>
           </div>
           <div className="space-y-3 text-xs text-slate-300 leading-relaxed">
             <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
-              <div className="font-semibold text-amber-300 mb-1">
-                1. EMA 指数移动奖励更新 (Exponential Weight Scaling)
+              <div className="font-semibold text-amber-300 mb-1 flex items-center gap-1.5">
+                <Clock className="w-3.5 h-3.5 text-amber-400" />
+                <span>1. 24h 交易时段隔离 (Session Time-Slicing)</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                每次平仓离场，系统根据实际净收益率与盈亏比计算 Reward 值。运用 $\alpha=0.18$ 的指数衰减公式实时更新形态权重，拉升盈利形态，压制低效形态。
+                系统将 24 小时划分为<strong>亚盘低波 (08-16)</strong>、<strong>欧盘动能 (16-22)</strong>、<strong>美盘高波 (22-06)</strong> 与<strong>尾盘交割 (06-08)</strong>。若某个形态在亚盘无脑假突破（胜率&lt;35%），系统自动激活<strong>时段陷阱拦截</strong>，避免无用试仓。
               </p>
             </div>
 
             <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
-              <div className="font-semibold text-sky-300 mb-1">
-                2. 形态质量分加成与剪枝 (Quality Score Boosting)
+              <div className="font-semibold text-sky-300 mb-1 flex items-center gap-1.5">
+                <Calendar className="w-3.5 h-3.5 text-sky-400" />
+                <span>2. K线周期独立特化 (Timeframe-Specific Weighting)</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                高胜率形态赋予 +5 ~ +15 分信号评级加成，开仓优先级提升；权重大幅下降的形态赋予 -12 ~ -25 分降维剪枝，自动过滤垃圾信号。
+                独立追踪 <strong>5m、15m、30m</strong> 各周期下的形态胜率。例如：某形态在 5m 噪声大胜率仅 30%，但在 30m 大周期下胜率达 75%，系统仅在 30m 周期下赋予高加成与大仓位！
               </p>
             </div>
 
             <div className="p-3 bg-slate-900/70 border border-slate-800 rounded-lg">
-              <div className="font-semibold text-emerald-300 mb-1">
-                3. 信念仓位控制 (Conviction Position Sizing)
+              <div className="font-semibold text-emerald-300 mb-1 flex items-center gap-1.5">
+                <Brain className="w-3.5 h-3.5 text-emerald-400" />
+                <span>3. 综合多维加权与信念仓位 (Composite Conviction)</span>
               </div>
               <p className="text-slate-400 text-[11px]">
-                根据学习积累的信念分数，在 0.40x ~ 1.50x 之间动态调整保证金，实现高把握形态重仓出击，低把握形态极小仓试探。
+                开仓前融合“全局权重 + 周期权重 + 时段权重”，实现黄金时段重仓爆发、低效时段降维避让。
               </p>
             </div>
           </div>
@@ -310,17 +321,17 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2 text-white font-bold text-sm">
               <Brain className="w-4 h-4 text-sky-400" />
-              <span>实时自学习日志流 (Reinforcement Events Stream)</span>
+              <span>多维自学习日志流 (Reinforcement Events Stream)</span>
             </div>
             <span className="text-[10px] text-slate-400 font-mono">
               {learningLogs.length} 条记录
             </span>
           </div>
 
-          <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-3 h-[250px] overflow-y-auto space-y-2 text-[11px] font-mono">
+          <div className="bg-slate-950/80 border border-slate-800 rounded-lg p-3 h-[270px] overflow-y-auto space-y-2 text-[11px] font-mono">
             {learningLogs.length === 0 ? (
               <div className="text-slate-500 text-center pt-20">
-                🤖 算法引擎运行中，产生平仓订单后将在此展示实时权重微调轨迹...
+                🤖 算法引擎运行中，产生平仓订单后将在此展示多维时空权重微调轨迹...
               </div>
             ) : (
               learningLogs.slice(0, 15).map((log) => (

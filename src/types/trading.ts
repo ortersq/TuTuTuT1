@@ -146,6 +146,23 @@ export interface ServerSystemMetrics {
   uptimeSeconds: number;
 }
 
+export interface PatternTimeframeStat {
+  timeframe: string;
+  weight: number;
+  winRate: number;
+  totalTrades: number;
+  wins: number;
+}
+
+export interface PatternSessionStat {
+  sessionKey: 'ASIA' | 'EUROPE' | 'US' | 'OVERNIGHT';
+  sessionName: string;
+  weight: number;
+  winRate: number;
+  totalTrades: number;
+  wins: number;
+}
+
 export interface PatternLearningItem {
   patternType: string;
   patternName: string;
@@ -159,6 +176,10 @@ export interface PatternLearningItem {
   totalNetPnlUsdt: number;
   qualityScoreBoost: number;
   adaptiveSizingMultiplier: number;
+  timeframeStats: PatternTimeframeStat[];
+  sessionStats: PatternSessionStat[];
+  bestTimeframe: string;
+  bestSession: string;
   status: 'OPTIMAL_HIGH_CONVICTION' | 'LEARNING_ACTIVE' | 'DECAY_PRUNED';
   lastUpdated: number;
 }

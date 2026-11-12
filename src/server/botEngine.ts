@@ -231,6 +231,23 @@ class TradingEngine {
     );
   }
 
+  private createInitialTimeframeStats() {
+    return [
+      { timeframe: '5m', weight: 1.0, winRate: 0, totalTrades: 0, wins: 0 },
+      { timeframe: '15m', weight: 1.0, winRate: 0, totalTrades: 0, wins: 0 },
+      { timeframe: '30m', weight: 1.0, winRate: 0, totalTrades: 0, wins: 0 },
+    ];
+  }
+
+  private createInitialSessionStats() {
+    return [
+      { sessionKey: 'ASIA' as const, sessionName: '亚盘低波震荡 (08:00-16:00)', weight: 1.0, winRate: 0, totalTrades: 0, wins: 0 },
+      { sessionKey: 'EUROPE' as const, sessionName: '欧盘趋势动能 (16:00-22:00)', weight: 1.0, winRate: 0, totalTrades: 0, wins: 0 },
+      { sessionKey: 'US' as const, sessionName: '美盘高波爆发 (22:00-06:00)', weight: 1.0, winRate: 0, totalTrades: 0, wins: 0 },
+      { sessionKey: 'OVERNIGHT' as const, sessionName: '尾盘平仓交割 (06:00-08:00)', weight: 1.0, winRate: 0, totalTrades: 0, wins: 0 },
+    ];
+  }
+
   private initPatternLearningState() {
     const defaultPatterns: { type: string; name: string }[] = [
       { type: 'WYCKOFF_SPRING', name: 'Wyckoff 弹簧破底洗盘 (Spring)' },
@@ -257,6 +274,10 @@ class TradingEngine {
         totalNetPnlUsdt: 0,
         qualityScoreBoost: 0,
         adaptiveSizingMultiplier: 1.0,
+        timeframeStats: this.createInitialTimeframeStats(),
+        sessionStats: this.createInitialSessionStats(),
+        bestTimeframe: '15m (初始)',
+        bestSession: '美盘高波爆发 (初始)',
         status: 'LEARNING_ACTIVE',
         lastUpdated: Date.now(),
       });
@@ -280,6 +301,10 @@ class TradingEngine {
         totalNetPnlUsdt: 0,
         qualityScoreBoost: 0,
         adaptiveSizingMultiplier: 1.0,
+        timeframeStats: this.createInitialTimeframeStats(),
+        sessionStats: this.createInitialSessionStats(),
+        bestTimeframe: trade.interval || '15m',
+        bestSession: '美盘高波爆发',
         status: 'LEARNING_ACTIVE',
         lastUpdated: Date.now(),
       };
@@ -300,7 +325,7 @@ class TradingEngine {
       reward -= 0.1;
     }
 
-    const alpha = 0.18; // Learning rate
+    const alpha = 0.18; // Global learning rate
     const oldWeight = item.weight;
     const newWeight = Math.max(0.2, Math.min(2.5, oldWeight * (1 + alpha * reward)));
     item.weight = Number(newWeight.toFixed(2));
@@ -312,6 +337,42 @@ class TradingEngine {
     item.totalNetPnlUsdt = Number((item.totalNetPnlUsdt + trade.netPnl).toFixed(2));
     item.avgPnlUsdt = Number((item.totalNetPnlUsdt / item.totalTrades).toFixed(2));
 
+    // 1. Update Timeframe-specific Statistics (5m vs 15m vs 30m)
+    const tfStat = item.timeframeStats.find((t) => t.timeframe === trade.interval);
+    if (tfStat) {
+      tfStat.totalTrades += 1;
+      if (trade.netPnl > 0) tfStat.wins += 1;
+      tfStat.winRate = Number(((tfStat.wins / tfStat.totalTrades) * 100).toFixed(1));
+      tfStat.weight = Number(Math.max(0.2, Math.min(2.5, tfStat.weight * (1 + alpha * reward))).toFixed(2));
+    }
+
+    // 2. Update Trading Session Statistics (Asia / Europe / US / Overnight)
+    const entryHourUtc = new Date(trade.entryTime).getUTCHours();
+    let sessionKey: 'ASIA' | 'EUROPE' | 'US' | 'OVERNIGHT' = 'ASIA';
+    if (entryHourUtc >= 14 && entryHourUtc < 22) sessionKey = 'US';
+    else if (entryHourUtc >= 8 && entryHourUtc < 14) sessionKey = 'EUROPE';
+    else if (entryHourUtc >= 22) sessionKey = 'OVERNIGHT';
+
+    const sStat = item.sessionStats.find((s) => s.sessionKey === sessionKey);
+    if (sStat) {
+      sStat.totalTrades += 1;
+      if (trade.netPnl > 0) sStat.wins += 1;
+      sStat.winRate = Number(((sStat.wins / sStat.totalTrades) * 100).toFixed(1));
+      sStat.weight = Number(Math.max(0.2, Math.min(2.5, sStat.weight * (1 + alpha * reward))).toFixed(2));
+    }
+
+    // 3. Recalculate Best Timeframe & Best Trading Session
+    const activeTfs = [...item.timeframeStats].sort((a, b) => b.winRate - a.winRate || b.totalTrades - a.totalTrades);
+    if (activeTfs[0] && activeTfs[0].totalTrades > 0) {
+      item.bestTimeframe = `${activeTfs[0].timeframe} (胜率 ${activeTfs[0].winRate}%)`;
+    }
+
+    const activeSessions = [...item.sessionStats].sort((a, b) => b.winRate - a.winRate || b.totalTrades - a.totalTrades);
+    if (activeSessions[0] && activeSessions[0].totalTrades > 0) {
+      item.bestSession = `${activeSessions[0].sessionName.split(' ')[0]} (胜率 ${activeSessions[0].winRate}%)`;
+    }
+
+    // Dynamic confidence score (0 ~ 100)
     const sampleFactor = Math.min(30, item.totalTrades * 5);
     const winFactor = item.winRate * 0.5;
     const weightFactor = (item.weight - 1.0) * 20;
@@ -340,7 +401,7 @@ class TradingEngine {
     this.addLog(
       'info',
       'SYSTEM',
-      `🧠 [强化自学习 Update #${this.learningGeneration}] 形态【${item.patternName}】权重更新: ${oldWeight.toFixed(2)}x -> ${item.weight.toFixed(2)}x | 质量加成: ${item.qualityScoreBoost >= 0 ? '+' : ''}${item.qualityScoreBoost} | 仓位乘数: ${item.adaptiveSizingMultiplier}x | 模式状态: ${item.status}`
+      `🧠 [多维时空自学习 Update #${this.learningGeneration}] 形态【${item.patternName}】在 [${trade.interval} / ${sessionKey}] 结算: 权重 ${oldWeight.toFixed(2)}x -> ${item.weight.toFixed(2)}x | 最佳周期: ${item.bestTimeframe} | 黄金时段: ${item.bestSession} | 信念仓位: ${item.adaptiveSizingMultiplier}x`
     );
   }
 
@@ -1139,13 +1200,43 @@ class TradingEngine {
               const patternTypeKey = matchedPattern.type;
               const learningItem = this.patternLearningWeights.get(patternTypeKey);
 
-              // 1. Online Self-Learning Pruning Check
+              // 1. Online Multi-Dimensional Self-Learning Check (Timeframe & Session Slicing)
               if (learningItem) {
                 if (learningItem.status === 'DECAY_PRUNED' && matchedPattern.qualityScore < 94) {
                   this.addLog(
                     'warn',
                     'SIGNAL',
                     `🧠 【自学习强化剪枝拦截】: 拒绝开仓！形态【${matchedPattern.name}】已被强化学习标记为低胜率剪枝 (权重 ${learningItem.weight}x, 胜率 ${learningItem.winRate}%, 信号分: ${matchedPattern.qualityScore})`,
+                    symbol
+                  );
+                  continue;
+                }
+
+                // A. Timeframe-Specific Low Win Rate Filter (5m vs 15m vs 30m)
+                const tfStat = learningItem.timeframeStats?.find((t) => t.timeframe === interval);
+                if (tfStat && tfStat.totalTrades >= 3 && tfStat.winRate < 35 && matchedPattern.qualityScore < 92) {
+                  this.addLog(
+                    'warn',
+                    'SIGNAL',
+                    `⏱️ 【周期离散防护拦截】: 拒绝开仓！形态【${matchedPattern.name}】在【${interval}】周期历史胜率仅 ${tfStat.winRate.toFixed(1)}% (${tfStat.wins}/${tfStat.totalTrades}胜)，降维避让`,
+                    symbol
+                  );
+                  continue;
+                }
+
+                // B. Trading Session Low Win Rate Filter (Asia / Europe / US / Overnight)
+                const currentUtcHour = new Date().getUTCHours();
+                let currentSessionKey: 'ASIA' | 'EUROPE' | 'US' | 'OVERNIGHT' = 'ASIA';
+                if (currentUtcHour >= 14 && currentUtcHour < 22) currentSessionKey = 'US';
+                else if (currentUtcHour >= 8 && currentUtcHour < 14) currentSessionKey = 'EUROPE';
+                else if (currentUtcHour >= 22) currentSessionKey = 'OVERNIGHT';
+
+                const sStat = learningItem.sessionStats?.find((s) => s.sessionKey === currentSessionKey);
+                if (sStat && sStat.totalTrades >= 3 && sStat.winRate < 35 && matchedPattern.qualityScore < 92) {
+                  this.addLog(
+                    'warn',
+                    'SIGNAL',
+                    `⏰ 【时段陷阱拦截】: 拒绝开仓！形态【${matchedPattern.name}】在当前【${sStat.sessionName.split(' ')[0]}】历史胜率仅 ${sStat.winRate.toFixed(1)}% (${sStat.wins}/${sStat.totalTrades}胜)，避开低效时段`,
                     symbol
                   );
                   continue;
