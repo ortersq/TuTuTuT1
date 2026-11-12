@@ -68,7 +68,6 @@ export function getOptimalStopLossPrescription(
   volLevel: VolatilityLevel,
   avgReversion: number
 ): { pattern: string; details: string; dominantExit: string } {
-  // NY Open or Extreme Volatility: The primary epicenter of reported profit-reversion!
   if (volLevel === 'EXTREME' || (hour >= 13 && hour <= 17)) {
     return {
       pattern: '阶梯式保本锁定 + 0.45% 紧敏追踪 (Stepped Breakeven & Micro-Trailing)',
@@ -96,7 +95,6 @@ export function getOptimalStopLossPrescription(
     };
   }
 
-  // Normal Volatility
   return {
     pattern: '50 EMA 趋势线防守 + 阶梯分批止盈 (50 EMA Trend Defense & Tiered TP)',
     details:
@@ -106,86 +104,7 @@ export function getOptimalStopLossPrescription(
 }
 
 /**
- * Empirical base pattern generator for a specific hour and volatility tier
- */
-function getEmpiricalBaseline(
-  hour: number,
-  volLevel: VolatilityLevel
-): {
-  baseTrades: number;
-  baseWinRate: number;
-  baseAvgNetPnl: number;
-  baseAvgPeakPnl: number;
-  baseAvgReversion: number;
-} {
-  // Seed pseudorandom characteristics based on hour and volatility
-  const isNY = hour >= 13 && hour <= 17;
-  const isLondon = hour >= 8 && hour <= 12;
-  const isAsia = hour >= 0 && hour <= 7;
-
-  if (volLevel === 'EXTREME') {
-    if (isNY) {
-      // Epicenter: High peak profits, but extreme reversion if left unprotected!
-      return {
-        baseTrades: 14,
-        baseWinRate: 52.0,
-        baseAvgNetPnl: -12.4, // Net loss before protect
-        baseAvgPeakPnl: 64.8, // Peak reached +$64.8
-        baseAvgReversion: 77.2, // Huge reversion!
-      };
-    } else {
-      return {
-        baseTrades: 9,
-        baseWinRate: 48.5,
-        baseAvgNetPnl: -8.5,
-        baseAvgPeakPnl: 48.0,
-        baseAvgReversion: 56.5,
-      };
-    }
-  }
-
-  if (volLevel === 'HIGH') {
-    if (isNY || isLondon) {
-      return {
-        baseTrades: 12,
-        baseWinRate: 58.0,
-        baseAvgNetPnl: 14.2,
-        baseAvgPeakPnl: 45.0,
-        baseAvgReversion: 30.8,
-      };
-    } else {
-      return {
-        baseTrades: 7,
-        baseWinRate: 50.0,
-        baseAvgNetPnl: 4.5,
-        baseAvgPeakPnl: 32.0,
-        baseAvgReversion: 27.5,
-      };
-    }
-  }
-
-  if (volLevel === 'NORMAL') {
-    return {
-      baseTrades: 10,
-      baseWinRate: 64.0,
-      baseAvgNetPnl: 22.8,
-      baseAvgPeakPnl: 34.5,
-      baseAvgReversion: 11.7,
-    };
-  }
-
-  // LOW
-  return {
-    baseTrades: isAsia ? 8 : 5,
-    baseWinRate: 55.0,
-    baseAvgNetPnl: 8.4,
-    baseAvgPeakPnl: 16.2,
-    baseAvgReversion: 7.8,
-  };
-}
-
-/**
- * Aggregates all closed trades (live & simulated) along with price action telemetry into a 24x4 Grid Matrix
+ * Aggregates only real closed trades (no fake or empirical filling) into a 24x4 Grid Matrix
  */
 export function aggregateHeatmapData(
   trades: BotTradeRecord[] = [],
@@ -193,7 +112,7 @@ export function aggregateHeatmapData(
 ): HeatmapCellData[][] {
   const { symbol = 'ALL', interval = 'ALL', timezoneOffsetHours = 0 } = options;
 
-  // Filter relevant trades
+  // Filter relevant trades strictly
   const filteredTrades = trades.filter((t) => {
     if (symbol !== 'ALL' && t.symbol !== symbol) return false;
     if (interval !== 'ALL' && t.interval !== interval) return false;
@@ -205,7 +124,6 @@ export function aggregateHeatmapData(
 
   for (const trade of filteredTrades) {
     const tradeDate = new Date(trade.entryTime || trade.exitTime);
-    // Apply timezone offset
     let h = (tradeDate.getUTCHours() + timezoneOffsetHours) % 24;
     if (h < 0) h += 24;
 
@@ -217,7 +135,7 @@ export function aggregateHeatmapData(
     realTradesMap.get(key)!.push(trade);
   }
 
-  // Build the 4 x 24 matrix (4 rows for volatility levels, 24 columns for hours)
+  // Build the 4 x 24 matrix
   const matrix: HeatmapCellData[][] = [];
 
   for (const volLevel of VOLATILITY_LEVELS) {
@@ -226,54 +144,33 @@ export function aggregateHeatmapData(
     for (let h = 0; h < 24; h++) {
       const key = `${h}_${volLevel}`;
       const cellRealTrades = realTradesMap.get(key) || [];
-      const base = getEmpiricalBaseline(h, volLevel);
 
-      let tradesCount = cellRealTrades.length;
-      let winningTrades = cellRealTrades.filter((t) => t.netPnl > 0).length;
-      let losingTrades = cellRealTrades.filter((t) => t.netPnl <= 0).length;
-      let totalNetPnl = cellRealTrades.reduce((acc, t) => acc + t.netPnl, 0);
-      let totalPeakPnl = cellRealTrades.reduce((acc, t) => acc + (t.peakPnlUsdt || 0), 0);
-      let totalReversion = cellRealTrades.reduce((acc, t) => acc + (t.reversionUsdt || 0), 0);
-
-      // If fewer real trades in this cell, blend with calibrated historical baseline
-      if (tradesCount === 0) {
-        tradesCount = base.baseTrades;
-        winningTrades = Math.round((base.baseWinRate / 100) * tradesCount);
-        losingTrades = tradesCount - winningTrades;
-        totalNetPnl = base.baseAvgNetPnl * tradesCount;
-        totalPeakPnl = base.baseAvgPeakPnl * tradesCount;
-        totalReversion = base.baseAvgReversion * tradesCount;
-      } else if (tradesCount < 5) {
-        // Blend
-        const weightReal = tradesCount / 5;
-        const weightBase = 1 - weightReal;
-        tradesCount = tradesCount + Math.round(base.baseTrades * weightBase);
-        const blendedWinRate =
-          (winningTrades / cellRealTrades.length) * 100 * weightReal + base.baseWinRate * weightBase;
-        winningTrades = Math.round((blendedWinRate / 100) * tradesCount);
-        losingTrades = tradesCount - winningTrades;
-        totalNetPnl = totalNetPnl + base.baseAvgNetPnl * base.baseTrades * weightBase;
-        totalPeakPnl = totalPeakPnl + base.baseAvgPeakPnl * base.baseTrades * weightBase;
-        totalReversion = totalReversion + base.baseAvgReversion * base.baseTrades * weightBase;
-      }
+      const tradesCount = cellRealTrades.length;
+      const winningTrades = cellRealTrades.filter((t) => t.netPnl > 0).length;
+      const losingTrades = cellRealTrades.filter((t) => t.netPnl <= 0).length;
+      const totalNetPnl = cellRealTrades.reduce((acc, t) => acc + t.netPnl, 0);
+      const totalPeakPnl = cellRealTrades.reduce((acc, t) => acc + (t.peakPnlUsdt || 0), 0);
+      const totalReversion = cellRealTrades.reduce((acc, t) => acc + (t.reversionUsdt || 0), 0);
 
       const winRate = tradesCount > 0 ? (winningTrades / tradesCount) * 100 : 0;
       const avgNetPnl = tradesCount > 0 ? totalNetPnl / tradesCount : 0;
       const avgPeakPnl = tradesCount > 0 ? totalPeakPnl / tradesCount : 0;
       const avgReversion = tradesCount > 0 ? totalReversion / tradesCount : 0;
 
-      // Reversion severity score: 0 to 100
-      // High score when peak was high (> $30) and reversion ratio > 60%
-      const reversionRatio = avgPeakPnl > 0 ? Math.min(1.5, avgReversion / avgPeakPnl) : 0;
-      let severity = Math.min(100, Math.round(reversionRatio * 50 + (avgReversion / 80) * 50));
-      if (avgNetPnl < 0 && avgPeakPnl > 25) {
-        severity = Math.max(75, severity);
+      // Reversion severity score: 0 to 100 based strictly on real trade metrics
+      let severity = 0;
+      if (tradesCount > 0) {
+        const reversionRatio = avgPeakPnl > 0 ? Math.min(1.5, avgReversion / avgPeakPnl) : 0;
+        severity = Math.min(100, Math.round(reversionRatio * 50 + (avgReversion / 80) * 50));
+        if (avgNetPnl < 0 && avgPeakPnl > 25) {
+          severity = Math.max(75, severity);
+        }
       }
 
       const prescription = getOptimalStopLossPrescription(h, volLevel, avgReversion);
 
-      // Prepare sample trades for inspection modal
-      const sampleTrades: HeatmapSampleTrade[] = cellRealTrades.slice(0, 5).map((t) => ({
+      // Only real trade samples from actual execution
+      const sampleTrades: HeatmapSampleTrade[] = cellRealTrades.map((t) => ({
         id: t.id,
         symbol: t.symbol,
         interval: t.interval,
@@ -287,24 +184,6 @@ export function aggregateHeatmapData(
         exitReason: t.exitReason,
         exitTime: t.exitTime,
       }));
-
-      // If no real samples, generate representative pattern samples
-      if (sampleTrades.length === 0) {
-        sampleTrades.push({
-          id: `sample-${key}-1`,
-          symbol: symbol !== 'ALL' ? symbol : 'BTCUSDT',
-          interval: interval !== 'ALL' ? interval : '15m',
-          side: 'LONG',
-          patternName: volLevel === 'EXTREME' ? '假突破刺透猎杀 (Wyckoff Spring)' : 'Al Brooks H2 顺势突破',
-          entryPrice: 68500,
-          exitPrice: avgNetPnl >= 0 ? 69100 : 68150,
-          netPnl: Number(avgNetPnl.toFixed(2)),
-          peakPnl: Number(avgPeakPnl.toFixed(2)),
-          reversionUsdt: Number(avgReversion.toFixed(2)),
-          exitReason: prescription.dominantExit,
-          exitTime: Date.now() - (24 - h) * 3600 * 1000,
-        });
-      }
 
       row.push({
         hour: h,
@@ -320,7 +199,7 @@ export function aggregateHeatmapData(
         reversionSeverityScore: severity,
         optimalStopLossPattern: prescription.pattern,
         optimalStopLossDetails: prescription.details,
-        dominantExitReason: prescription.dominantExit,
+        dominantExitReason: cellRealTrades.length > 0 ? cellRealTrades[0].exitReason : prescription.dominantExit,
         sampleTrades,
       });
     }
@@ -332,7 +211,7 @@ export function aggregateHeatmapData(
 }
 
 /**
- * Computes top-level heatmap metrics and identifies the worst profit-reversion vulnerability zone
+ * Computes top-level heatmap metrics strictly based on real trades (0 if no trades yet)
  */
 export function calculateHeatmapSummary(matrix: HeatmapCellData[][]): HeatmapSummary {
   let totalTrades = 0;
@@ -362,8 +241,22 @@ export function calculateHeatmapSummary(matrix: HeatmapCellData[][]): HeatmapSum
     }
   }
 
+  if (totalTrades === 0) {
+    return {
+      totalAnalyzedTrades: 0,
+      overallWinRate: 0,
+      totalNetPnl: 0,
+      totalReversionUsdt: 0,
+      avgReversionRatePercent: 0,
+      highestReversionHour: 14,
+      highestReversionSession: '暂无已完成调单',
+      mostVulnerableVolatilityLevel: 'NORMAL',
+      estimatedSalvagedPnlWithBreakevenLock: 0,
+    };
+  }
+
   // Find hour with highest reversion
-  let highestReversionHour = 14;
+  let highestReversionHour = 0;
   let maxHourRev = -1;
   hourReversionMap.forEach((rev, h) => {
     if (rev > maxHourRev) {
@@ -373,7 +266,7 @@ export function calculateHeatmapSummary(matrix: HeatmapCellData[][]): HeatmapSum
   });
 
   // Find worst volatility tier
-  let mostVulnerableVolatilityLevel: VolatilityLevel = 'EXTREME';
+  let mostVulnerableVolatilityLevel: VolatilityLevel = 'NORMAL';
   let maxVolRev = -1;
   for (const v of VOLATILITY_LEVELS) {
     if (volReversionMap[v] > maxVolRev) {
@@ -382,20 +275,15 @@ export function calculateHeatmapSummary(matrix: HeatmapCellData[][]): HeatmapSum
     }
   }
 
-  // Find session name for highest reversion hour
   const sessionObj = SESSIONS_META.find((s) => s.hours.includes(highestReversionHour));
-  const highestReversionSession = sessionObj ? sessionObj.name : '美洲主战区';
+  const highestReversionSession = sessionObj ? sessionObj.name : '未知时段';
 
-  const avgReversionRatePercent =
-    totalPeakPnl > 0 ? (totalReversion / totalPeakPnl) * 100 : 42.5;
-
-  // Estimate how much profit can be protected/salvaged using breakeven lock + 0.45% trailing stop
-  // Typically prevents 60% of unnecessary givebacks
+  const avgReversionRatePercent = totalPeakPnl > 0 ? (totalReversion / totalPeakPnl) * 100 : 0;
   const estimatedSalvagedPnlWithBreakevenLock = totalReversion * 0.58;
 
   return {
     totalAnalyzedTrades: totalTrades,
-    overallWinRate: totalTrades > 0 ? Number(((totalWins / totalTrades) * 100).toFixed(1)) : 56.4,
+    overallWinRate: Number(((totalWins / totalTrades) * 100).toFixed(1)),
     totalNetPnl: Number(totalNetPnl.toFixed(2)),
     totalReversionUsdt: Number(totalReversion.toFixed(2)),
     avgReversionRatePercent: Number(avgReversionRatePercent.toFixed(1)),

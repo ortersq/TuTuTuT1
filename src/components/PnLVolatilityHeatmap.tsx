@@ -20,11 +20,9 @@ import {
   Compass,
   Zap,
   Crosshair,
-  ArrowRight,
   Info,
-  Sliders,
-  DollarSign,
   Activity,
+  CheckCircle2,
 } from 'lucide-react';
 
 interface PnLVolatilityHeatmapProps {
@@ -42,7 +40,7 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
   const [heatmapMode, setHeatmapMode] = useState<'reversion' | 'pnl' | 'winrate'>('reversion');
   const [selectedCell, setSelectedCell] = useState<HeatmapCellData | null>(null);
 
-  // Compute heatmap grid & summary
+  // Compute heatmap grid & summary strictly from real trades
   const options: HeatmapOptions = useMemo(
     () => ({
       symbol: selectedSymbol,
@@ -55,15 +53,14 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
   const matrix = useMemo(() => aggregateHeatmapData(closedTrades, options), [closedTrades, options]);
   const summary = useMemo(() => calculateHeatmapSummary(matrix), [matrix]);
 
-  // Default select the worst reversion cell on initial mount if not selected
+  // Default select the cell with real trades, or default to hour 14
   const activeCell = useMemo(() => {
     if (selectedCell) return selectedCell;
-    // Find cell with highest severity score
     let worstCell: HeatmapCellData | null = null;
     let maxSev = -1;
     for (const row of matrix) {
       for (const cell of row) {
-        if (cell.reversionSeverityScore > maxSev) {
+        if (cell.tradesCount > 0 && cell.reversionSeverityScore > maxSev) {
           maxSev = cell.reversionSeverityScore;
           worstCell = cell;
         }
@@ -72,8 +69,12 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
     return worstCell || matrix[0][14];
   }, [selectedCell, matrix]);
 
-  // Color generator for heatmap cells
+  // Color generator for heatmap cells (dark/empty for cells with 0 real trades)
   const getCellBgColor = (cell: HeatmapCellData) => {
+    if (cell.tradesCount === 0) {
+      return 'bg-[#0b0e14] text-slate-600 border-slate-800/70 hover:border-slate-700';
+    }
+
     if (heatmapMode === 'reversion') {
       const score = cell.reversionSeverityScore;
       if (score >= 80) return 'bg-rose-600/90 text-white font-bold border-rose-400 shadow-rose-900/40';
@@ -111,9 +112,12 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
               <div>
                 <h2 className="text-base font-bold text-white flex items-center gap-2">
                   <span>波动率与利润回吐多维热力图 (PnL Volatility & Reversion Matrix)</span>
+                  <span className="text-[11px] px-2 py-0.5 rounded-full bg-emerald-500/10 text-emerald-400 font-medium border border-emerald-500/20 flex items-center gap-1">
+                    <CheckCircle2 className="w-3 h-3" /> 纯真实调单数据
+                  </span>
                 </h2>
                 <div className="text-xs text-slate-400">
-                  深度复盘「盈利达 +$30~+$80 却最终回吐倒亏 -$30」的时段特征与波动诱因，匹配最优止损防御形态
+                  复盘真实调单的「最高冲高浮盈」与「回吐金额」，严禁填充任何虚假/填充数据，没有数据即显示 0 笔
                 </div>
               </div>
             </div>
@@ -231,24 +235,32 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
             <span>回吐最频发时段</span>
           </div>
           <div className="text-base font-bold text-rose-400 font-mono mt-1">
-            {summary.highestReversionHour.toString().padStart(2, '0')}:00{' '}
-            <span className="text-xs text-slate-300 font-sans font-normal">
-              ({summary.highestReversionSession})
-            </span>
+            {summary.totalAnalyzedTrades > 0 ? (
+              <>
+                {summary.highestReversionHour.toString().padStart(2, '0')}:00{' '}
+                <span className="text-xs text-slate-300 font-sans font-normal">
+                  ({summary.highestReversionSession})
+                </span>
+              </>
+            ) : (
+              <span className="text-slate-500 font-sans text-sm">暂无数据</span>
+            )}
           </div>
-          <div className="text-[11px] text-slate-500 mt-1">美盘开盘剧烈插针，极易吞没已有浮盈</div>
+          <div className="text-[11px] text-slate-500 mt-1">根据真实已平仓订单计算</div>
         </div>
 
         <div className="bg-[#111726] border border-slate-800 rounded-xl p-4">
           <div className="text-xs text-slate-400 font-medium flex items-center gap-1.5">
             <Activity className="w-3.5 h-3.5 text-amber-400" />
-            <span>最脆弱波动层级</span>
+            <span>已分析真实调单总数</span>
           </div>
-          <div className="text-base font-bold text-amber-400 mt-1">
-            {VOLATILITY_META[summary.mostVulnerableVolatilityLevel].label.split(' ')[0]}
+          <div className="text-base font-bold text-amber-400 font-mono mt-1">
+            {summary.totalAnalyzedTrades} 笔
           </div>
           <div className="text-[11px] text-slate-500 mt-1">
-            {VOLATILITY_META[summary.mostVulnerableVolatilityLevel].range}，单根大阴阳线洗盘
+            {summary.totalAnalyzedTrades > 0
+              ? `总体实盘胜率: ${summary.overallWinRate}%`
+              : '目前尚无完成调单，无任何虚假填充'}
           </div>
         </div>
 
@@ -258,10 +270,10 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
             <span>盘中平均回吐比例</span>
           </div>
           <div className="text-base font-bold text-slate-100 font-mono mt-1">
-            {summary.avgReversionRatePercent}%
+            {summary.totalAnalyzedTrades > 0 ? `${summary.avgReversionRatePercent}%` : '--'}
           </div>
           <div className="text-[11px] text-rose-400/90 mt-1">
-            累计浮盈回吐总额: -${summary.totalReversionUsdt.toLocaleString()}
+            累计浮盈回吐总额: ${summary.totalReversionUsdt > 0 ? `-$${summary.totalReversionUsdt.toLocaleString()}` : '$0.00'}
           </div>
         </div>
 
@@ -273,7 +285,7 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
           <div className="text-base font-bold text-emerald-400 font-mono mt-1">
             +${summary.estimatedSalvagedPnlWithBreakevenLock.toLocaleString()} USDT
           </div>
-          <div className="text-[11px] text-slate-400 mt-1">启用浮盈 +$25 保本锁定与 0.45% 移动止盈</div>
+          <div className="text-[11px] text-slate-400 mt-1">基于真实回吐数据的挽回测算</div>
         </div>
       </div>
 
@@ -293,7 +305,7 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
                 <span className="w-2 h-2 rounded-full bg-indigo-400" /> 伦敦盘 (08-13)
               </span>
               <span className="flex items-center gap-1 font-semibold text-rose-300">
-                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> 纽约主战区 (13-18 高危)
+                <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" /> 纽约主战区 (13-18)
               </span>
               <span className="flex items-center gap-1">
                 <span className="w-2 h-2 rounded-full bg-slate-500" /> 美盘结算 (18-24)
@@ -303,37 +315,15 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
 
           {/* Color Scale Legend */}
           <div className="flex items-center gap-2 font-mono text-[11px]">
-            <span className="text-slate-400">
-              {heatmapMode === 'reversion'
-                ? '回吐严重度:'
-                : heatmapMode === 'pnl'
-                ? '盈亏金额:'
-                : '胜率:'}
-            </span>
+            <span className="text-slate-400">图例状态:</span>
             <div className="flex items-center gap-1">
-              {heatmapMode === 'reversion' ? (
-                <>
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-950/40 text-emerald-300 border border-emerald-900/40">
-                    良性锁定
-                  </span>
-                  <span className="px-1.5 py-0.5 rounded bg-amber-500/60 text-amber-100">中度回撤</span>
-                  <span className="px-1.5 py-0.5 rounded bg-rose-600/90 text-white font-bold">
-                    重灾回吐
-                  </span>
-                </>
-              ) : heatmapMode === 'pnl' ? (
-                <>
-                  <span className="px-1.5 py-0.5 rounded bg-rose-700 text-white">大亏</span>
-                  <span className="px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">平衡</span>
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white">大盈</span>
-                </>
-              ) : (
-                <>
-                  <span className="px-1.5 py-0.5 rounded bg-rose-600 text-white">&lt;40%</span>
-                  <span className="px-1.5 py-0.5 rounded bg-cyan-600 text-white">50%~60%</span>
-                  <span className="px-1.5 py-0.5 rounded bg-emerald-600 text-white">&gt;65%</span>
-                </>
-              )}
+              <span className="px-1.5 py-0.5 rounded bg-[#0b0e14] text-slate-500 border border-slate-800">
+                0单 (空)
+              </span>
+              <span className="px-1.5 py-0.5 rounded bg-amber-500/60 text-amber-100">有回吐</span>
+              <span className="px-1.5 py-0.5 rounded bg-rose-600/90 text-white font-bold">
+                重灾区
+              </span>
             </div>
           </div>
         </div>
@@ -396,51 +386,65 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
                             ? 'ring-2 ring-amber-400 scale-[1.03] z-10 shadow-lg'
                             : 'hover:scale-[1.02] hover:z-5'
                         }`}
-                        title={`时点 ${cell.hour}:00 | 波动: ${meta.label}\n平均净盈亏: $${cell.avgNetPnl} USDT\n平均冲高浮盈: +$${cell.avgPeakPnl} USDT\n平均回吐: -$${cell.avgReversion} USDT\n调单次数: ${cell.tradesCount} 笔`}
+                        title={
+                          cell.tradesCount > 0
+                            ? `时点 ${cell.hour}:00 | 波动: ${meta.label}\n真实调单: ${cell.tradesCount} 笔\n平均净盈亏: $${cell.avgNetPnl} USDT\n平均最高浮盈: +$${cell.avgPeakPnl} USDT\n平均回吐: -$${cell.avgReversion} USDT`
+                            : `时点 ${cell.hour}:00 | 波动: ${meta.label}\n目前暂无真实平仓调单`
+                        }
                       >
-                        {heatmapMode === 'reversion' && (
+                        {cell.tradesCount === 0 ? (
                           <>
-                            <span className="text-[11px] font-mono font-bold leading-none">
-                              -${Math.round(cell.avgReversion)}
+                            <span className="text-[11px] font-mono text-slate-600 font-semibold">
+                              --
                             </span>
-                            <span className="text-[9px] opacity-80 font-mono mt-0.5">
-                              峰+${Math.round(cell.avgPeakPnl)}
-                            </span>
-                            <span className="text-[8px] opacity-70 font-mono leading-none">
-                              {cell.tradesCount}单
-                            </span>
+                            <span className="text-[8px] text-slate-600 font-mono mt-0.5">0单</span>
+                          </>
+                        ) : (
+                          <>
+                            {heatmapMode === 'reversion' && (
+                              <>
+                                <span className="text-[11px] font-mono font-bold leading-none text-rose-300">
+                                  -${Math.round(cell.avgReversion)}
+                                </span>
+                                <span className="text-[9px] opacity-80 font-mono mt-0.5">
+                                  峰+${Math.round(cell.avgPeakPnl)}
+                                </span>
+                                <span className="text-[8px] opacity-70 font-mono leading-none">
+                                  {cell.tradesCount}单
+                                </span>
+                              </>
+                            )}
+
+                            {heatmapMode === 'pnl' && (
+                              <>
+                                <span className="text-[11px] font-mono font-bold leading-none">
+                                  {cell.avgNetPnl >= 0 ? '+' : ''}${Math.round(cell.avgNetPnl)}
+                                </span>
+                                <span className="text-[9px] opacity-80 font-mono mt-0.5">
+                                  胜率{cell.winRate.toFixed(0)}%
+                                </span>
+                                <span className="text-[8px] opacity-70 font-mono leading-none">
+                                  {cell.tradesCount}单
+                                </span>
+                              </>
+                            )}
+
+                            {heatmapMode === 'winrate' && (
+                              <>
+                                <span className="text-[11px] font-mono font-bold leading-none">
+                                  {cell.winRate.toFixed(0)}%
+                                </span>
+                                <span className="text-[9px] opacity-80 font-mono mt-0.5">
+                                  {cell.winningTrades}胜/{cell.losingTrades}负
+                                </span>
+                                <span className="text-[8px] opacity-70 font-mono leading-none">
+                                  {cell.tradesCount}单
+                                </span>
+                              </>
+                            )}
                           </>
                         )}
 
-                        {heatmapMode === 'pnl' && (
-                          <>
-                            <span className="text-[11px] font-mono font-bold leading-none">
-                              {cell.avgNetPnl >= 0 ? '+' : ''}${Math.round(cell.avgNetPnl)}
-                            </span>
-                            <span className="text-[9px] opacity-80 font-mono mt-0.5">
-                              胜率{cell.winRate.toFixed(0)}%
-                            </span>
-                            <span className="text-[8px] opacity-70 font-mono leading-none">
-                              {cell.tradesCount}单
-                            </span>
-                          </>
-                        )}
-
-                        {heatmapMode === 'winrate' && (
-                          <>
-                            <span className="text-[11px] font-mono font-bold leading-none">
-                              {cell.winRate.toFixed(0)}%
-                            </span>
-                            <span className="text-[9px] opacity-80 font-mono mt-0.5">
-                              {cell.winningTrades}胜/{cell.losingTrades}负
-                            </span>
-                            <span className="text-[8px] opacity-70 font-mono leading-none">
-                              {cell.tradesCount}单
-                            </span>
-                          </>
-                        )}
-
-                        {/* Top corner indicator if high reversion severity */}
                         {cell.reversionSeverityScore >= 75 && (
                           <span className="absolute top-0.5 right-0.5 w-1.5 h-1.5 rounded-full bg-white animate-ping" />
                         )}
@@ -456,10 +460,10 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
         <div className="flex items-center justify-between text-[11px] text-slate-400 pt-2 border-t border-slate-800">
           <span className="flex items-center gap-1.5">
             <Info className="w-3.5 h-3.5 text-amber-400" />
-            <span>点击热力图中任意方格，即可在下方查看该时段的具体诱因、调单样本及最优止损形态配置</span>
+            <span>点击图中方格可查阅详细调单与推荐防守形态</span>
           </span>
-          <span className="font-mono text-slate-500">
-            总统计样本: {summary.totalAnalyzedTrades} 笔调单 | 全天 24h × 4 层级全域覆盖
+          <span className="font-mono text-slate-400 font-semibold">
+            真实已平仓总调单: {summary.totalAnalyzedTrades} 笔 (无任何伪造数据)
           </span>
         </div>
       </div>
@@ -478,7 +482,7 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
                     时段深剖: {activeCell.hour.toString().padStart(2, '0')}:00 ~ {(activeCell.hour + 1).toString().padStart(2, '0')}:00 (
                     {VOLATILITY_META[activeCell.volatilityLevel as VolatilityLevel]?.label || activeCell.volatilityLevel})
                   </span>
-                  {activeCell.reversionSeverityScore >= 75 && (
+                  {activeCell.tradesCount > 0 && activeCell.reversionSeverityScore >= 75 && (
                     <span className="text-[11px] px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold border border-rose-500/40">
                       ⚠️ 利润回吐重灾区
                     </span>
@@ -492,62 +496,143 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
 
             <div className="flex items-center gap-2 text-xs">
               <div className="bg-[#0b0e14] px-3 py-1.5 rounded-lg border border-slate-800 font-mono">
-                <span className="text-slate-400">调单样本: </span>
+                <span className="text-slate-400">真实调单样本: </span>
                 <span className="text-slate-100 font-bold">{activeCell.tradesCount} 笔</span>
               </div>
-              <div className="bg-[#0b0e14] px-3 py-1.5 rounded-lg border border-slate-800 font-mono">
-                <span className="text-slate-400">胜率: </span>
-                <span className="text-amber-400 font-bold">{activeCell.winRate}%</span>
-              </div>
+              {activeCell.tradesCount > 0 && (
+                <div className="bg-[#0b0e14] px-3 py-1.5 rounded-lg border border-slate-800 font-mono">
+                  <span className="text-slate-400">胜率: </span>
+                  <span className="text-amber-400 font-bold">{activeCell.winRate}%</span>
+                </div>
+              )}
             </div>
           </div>
 
-          {/* Metric Comparison in Selected Cell */}
-          <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
-            <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3">
-              <div className="text-slate-400 font-medium">盘中平均冲高浮盈 (Peak PnL)</div>
-              <div className="text-lg font-bold font-mono text-emerald-400 mt-1">
-                +${activeCell.avgPeakPnl.toFixed(2)} USDT
+          {activeCell.tradesCount === 0 ? (
+            <div className="p-6 bg-[#0b0e14] border border-slate-800 rounded-xl text-center text-xs text-slate-400 space-y-1.5">
+              <div className="font-bold text-slate-300 text-sm">
+                目前在该时点/波动区间尚无已完成的真实调单 (0 笔)
               </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">
-                行情顺势启动时，持仓曾轻松盈利到该数值
-              </div>
+              <p className="text-slate-500 max-w-lg mx-auto">
+                已全面保持数据的真实性，没有进行任何模拟填充。当机器人监控到 5m/15m/30m 信号并完成实际平仓后，将在此自动统计真实冲高与回吐数据。
+              </p>
             </div>
+          ) : (
+            <>
+              {/* Metric Comparison in Selected Cell */}
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+                <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3">
+                  <div className="text-slate-400 font-medium">盘中平均冲高浮盈 (Peak PnL)</div>
+                  <div className="text-lg font-bold font-mono text-emerald-400 mt-1">
+                    +${activeCell.avgPeakPnl.toFixed(2)} USDT
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    行情顺势启动时，持仓曾轻松盈利到该数值
+                  </div>
+                </div>
 
-            <div className="bg-[#0b0e14] border border-rose-500/30 rounded-xl p-3 bg-rose-500/5">
-              <div className="text-rose-300 font-medium">冲高后平均回吐金额 (Profit Given Back)</div>
-              <div className="text-lg font-bold font-mono text-rose-400 mt-1">
-                -${activeCell.avgReversion.toFixed(2)} USDT
-              </div>
-              <div className="text-[11px] text-rose-400/80 mt-0.5">
-                回吐比率高达{' '}
-                {activeCell.avgPeakPnl > 0
-                  ? ((activeCell.avgReversion / activeCell.avgPeakPnl) * 100).toFixed(1)
-                  : 0}
-                %
-              </div>
-            </div>
+                <div className="bg-[#0b0e14] border border-rose-500/30 rounded-xl p-3 bg-rose-500/5">
+                  <div className="text-rose-300 font-medium">冲高后平均回吐金额 (Profit Given Back)</div>
+                  <div className="text-lg font-bold font-mono text-rose-400 mt-1">
+                    -${activeCell.avgReversion.toFixed(2)} USDT
+                  </div>
+                  <div className="text-[11px] text-rose-400/80 mt-0.5">
+                    回吐比率:{' '}
+                    {activeCell.avgPeakPnl > 0
+                      ? ((activeCell.avgReversion / activeCell.avgPeakPnl) * 100).toFixed(1)
+                      : 0}
+                    %
+                  </div>
+                </div>
 
-            <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3">
-              <div className="text-slate-400 font-medium">最终结算净盈亏 (Final Net PnL)</div>
-              <div
-                className={`text-lg font-bold font-mono mt-1 ${
-                  activeCell.avgNetPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                }`}
-              >
-                {activeCell.avgNetPnl >= 0 ? '+' : ''}${activeCell.avgNetPnl.toFixed(2)} USDT
+                <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3">
+                  <div className="text-slate-400 font-medium">最终结算净盈亏 (Final Net PnL)</div>
+                  <div
+                    className={`text-lg font-bold font-mono mt-1 ${
+                      activeCell.avgNetPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                    }`}
+                  >
+                    {activeCell.avgNetPnl >= 0 ? '+' : ''}${activeCell.avgNetPnl.toFixed(2)} USDT
+                  </div>
+                  <div className="text-[11px] text-slate-500 mt-0.5">
+                    若缺乏防守，原有暴利单将在插针中倒亏平仓
+                  </div>
+                </div>
               </div>
-              <div className="text-[11px] text-slate-500 mt-0.5">
-                若缺乏防守，原有暴利单将在插针中倒亏平仓
+
+              {/* Sample Trades in Selected Cell */}
+              <div className="space-y-2 pt-1">
+                <div className="text-xs font-bold text-slate-300 flex items-center justify-between">
+                  <span>真实调单样本明细 ({activeCell.sampleTrades.length} 笔)</span>
+                </div>
+
+                <div className="overflow-x-auto">
+                  <table className="w-full text-xs text-left">
+                    <thead className="bg-[#0b0e14] text-slate-400 border-b border-slate-800 font-mono">
+                      <tr>
+                        <th className="py-2 px-3">币种/周期</th>
+                        <th className="py-2 px-3">方向</th>
+                        <th className="py-2 px-3">形态名称</th>
+                        <th className="py-2 px-3 text-right">开仓价</th>
+                        <th className="py-2 px-3 text-right">平仓价</th>
+                        <th className="py-2 px-3 text-right">盘中最高浮盈</th>
+                        <th className="py-2 px-3 text-right">回吐金额</th>
+                        <th className="py-2 px-3 text-right">最终净盈亏</th>
+                        <th className="py-2 px-3 text-center">平仓诱因</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-800/60 font-mono">
+                      {activeCell.sampleTrades.map((trade: HeatmapSampleTrade) => (
+                        <tr key={trade.id} className="hover:bg-slate-800/30">
+                          <td className="py-2 px-3 font-bold text-slate-300">
+                            {trade.symbol} ({trade.interval})
+                          </td>
+                          <td className="py-2 px-3">
+                            <span
+                              className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
+                                trade.side === 'LONG'
+                                  ? 'bg-emerald-500/20 text-emerald-300'
+                                  : 'bg-rose-500/20 text-rose-300'
+                              }`}
+                            >
+                              {trade.side}
+                            </span>
+                          </td>
+                          <td className="py-2 px-3 text-slate-200">{trade.patternName}</td>
+                          <td className="py-2 px-3 text-right text-slate-400">${trade.entryPrice}</td>
+                          <td className="py-2 px-3 text-right text-slate-200">${trade.exitPrice}</td>
+                          <td className="py-2 px-3 text-right text-emerald-400 font-bold">
+                            +${trade.peakPnl.toFixed(2)}
+                          </td>
+                          <td className="py-2 px-3 text-right text-rose-400 font-bold">
+                            {trade.reversionUsdt > 0 ? `-$${trade.reversionUsdt.toFixed(2)}` : '$0.00'}
+                          </td>
+                          <td
+                            className={`py-2 px-3 text-right font-bold ${
+                              trade.netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                            }`}
+                          >
+                            {trade.netPnl >= 0 ? '+' : ''}${trade.netPnl.toFixed(2)} USDT
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
+                              {trade.exitReason}
+                            </span>
+                          </td>
+                        </tr>
+                      ))}
+                    </tbody>
+                  </table>
+                </div>
               </div>
-            </div>
-          </div>
+            </>
+          )}
 
           {/* Optimal Stop-Loss Prescription Recommendation */}
           <div className="p-4 bg-amber-500/10 border border-amber-500/40 rounded-xl space-y-2">
             <div className="flex items-center gap-2 text-sm font-bold text-amber-300">
               <ShieldCheck className="w-5 h-5 text-amber-400 shrink-0" />
-              <span>针对此波动区间的最优止损/止盈形态策略 (Optimal Stop-Loss Prescription):</span>
+              <span>针对此波动区间推荐的最优止损/止盈形态策略 (Optimal Stop-Loss Prescription):</span>
             </div>
             <div className="text-sm font-bold text-slate-100 pl-7">
               {activeCell.optimalStopLossPattern}
@@ -556,79 +641,10 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
               {activeCell.optimalStopLossDetails}
             </div>
           </div>
-
-          {/* Sample Trades in Selected Cell */}
-          <div className="space-y-2 pt-1">
-            <div className="text-xs font-bold text-slate-300 flex items-center justify-between">
-              <span>该区间调单样本明细 ({activeCell.sampleTrades.length} 笔)</span>
-              <span className="text-[11px] text-slate-500 font-normal">
-                展示实盘/模拟观测在此环境下的订单轨迹
-              </span>
-            </div>
-
-            <div className="overflow-x-auto">
-              <table className="w-full text-xs text-left">
-                <thead className="bg-[#0b0e14] text-slate-400 border-b border-slate-800 font-mono">
-                  <tr>
-                    <th className="py-2 px-3">币种/周期</th>
-                    <th className="py-2 px-3">方向</th>
-                    <th className="py-2 px-3">形态名称</th>
-                    <th className="py-2 px-3 text-right">开仓价</th>
-                    <th className="py-2 px-3 text-right">平仓价</th>
-                    <th className="py-2 px-3 text-right">盘中最高浮盈</th>
-                    <th className="py-2 px-3 text-right">回吐金额</th>
-                    <th className="py-2 px-3 text-right">最终净盈亏</th>
-                    <th className="py-2 px-3 text-center">平仓诱因</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-800/60 font-mono">
-                  {activeCell.sampleTrades.map((trade: HeatmapSampleTrade) => (
-                    <tr key={trade.id} className="hover:bg-slate-800/30">
-                      <td className="py-2 px-3 font-bold text-slate-300">
-                        {trade.symbol} ({trade.interval})
-                      </td>
-                      <td className="py-2 px-3">
-                        <span
-                          className={`px-1.5 py-0.5 rounded font-bold text-[10px] ${
-                            trade.side === 'LONG'
-                              ? 'bg-emerald-500/20 text-emerald-300'
-                              : 'bg-rose-500/20 text-rose-300'
-                          }`}
-                        >
-                          {trade.side}
-                        </span>
-                      </td>
-                      <td className="py-2 px-3 text-slate-200">{trade.patternName}</td>
-                      <td className="py-2 px-3 text-right text-slate-400">${trade.entryPrice}</td>
-                      <td className="py-2 px-3 text-right text-slate-200">${trade.exitPrice}</td>
-                      <td className="py-2 px-3 text-right text-emerald-400 font-bold">
-                        +${trade.peakPnl.toFixed(2)}
-                      </td>
-                      <td className="py-2 px-3 text-right text-rose-400 font-bold">
-                        {trade.reversionUsdt > 0 ? `-$${trade.reversionUsdt.toFixed(2)}` : '$0.00'}
-                      </td>
-                      <td
-                        className={`py-2 px-3 text-right font-bold ${
-                          trade.netPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'
-                        }`}
-                      >
-                        {trade.netPnl >= 0 ? '+' : ''}${trade.netPnl.toFixed(2)} USDT
-                      </td>
-                      <td className="py-2 px-3 text-center">
-                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-slate-800 text-slate-300">
-                          {trade.exitReason}
-                        </span>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
         </div>
       )}
 
-      {/* 5. Four Optimal Stop-Loss Pattern Archetypes Matrix (System Strategy Knowledge Base) */}
+      {/* 5. Four Optimal Stop-Loss Pattern Archetypes Matrix */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <div className="flex items-center gap-2">
@@ -654,7 +670,7 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
               </span>
             </div>
             <p className="text-slate-300 leading-relaxed">
-              <strong>解决痛点</strong>：杜绝「浮盈 +$30~+$80 倒亏 -$30」。当浮盈突破 <strong>+$25</strong> 时，止损自动提升至本金之上；浮盈突破 <strong>+$50</strong> 时锁定 65% 净利润；回撤超 0.45% 果断离场。
+              <strong>解决痛点</strong>：杜绝「浮盈 +$30~+$80 倒亏 -$30」。当浮盈突破 <strong>+$25</strong> 时，止损自动提升至成本价之上；浮盈突破 <strong>+$50</strong> 时锁定 65% 净利润；回撤超 0.45% 果断离场。
             </p>
           </div>
 

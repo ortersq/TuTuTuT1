@@ -50,19 +50,19 @@ test('PnL Volatility Heatmap: Matrix Dimensions & Cell Structure', () => {
   const cell14Extreme = matrix[0][14];
   assert.strictEqual(cell14Extreme.hour, 14);
   assert.strictEqual(cell14Extreme.volatilityLevel, 'EXTREME');
+  assert.strictEqual(cell14Extreme.tradesCount, 1);
   assert.ok(cell14Extreme.reversionSeverityScore > 60, 'Reversion severity score should be high for extreme NY hours');
   assert.ok(cell14Extreme.optimalStopLossPattern.includes('阶梯式保本锁定'));
 });
 
-test('PnL Volatility Heatmap: Summary Calculation', () => {
+test('PnL Volatility Heatmap: Empty Real Trades Summary Calculation', () => {
   const matrix = aggregateHeatmapData([]);
   const summary = calculateHeatmapSummary(matrix);
 
-  assert.ok(summary.totalAnalyzedTrades > 0);
-  assert.ok(summary.avgReversionRatePercent > 0);
-  assert.ok(summary.highestReversionHour >= 0 && summary.highestReversionHour < 24);
-  assert.ok(VOLATILITY_LEVELS.includes(summary.mostVulnerableVolatilityLevel));
-  assert.ok(summary.estimatedSalvagedPnlWithBreakevenLock > 0);
+  assert.strictEqual(summary.totalAnalyzedTrades, 0);
+  assert.strictEqual(summary.totalNetPnl, 0);
+  assert.strictEqual(summary.totalReversionUsdt, 0);
+  assert.strictEqual(summary.estimatedSalvagedPnlWithBreakevenLock, 0);
 });
 
 test('Optimal Stop-Loss Prescriptions: Logic for Extreme vs Low Volatility', () => {
