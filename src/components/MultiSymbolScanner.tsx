@@ -4,6 +4,7 @@ import { Activity, ShieldCheck, Zap, LineChart, AlertTriangle, Compass, HeartPul
 import { CandleChart } from './CandleChart';
 import { LiveEquityChart } from './LiveEquityChart';
 import { ServerSystemDashboard } from './ServerSystemDashboard';
+import { LivePerformanceMonitor } from './LivePerformanceMonitor';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { Kline } from '../types/trading';
 
@@ -103,6 +104,9 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
           <span className="text-[11px] text-sky-300 font-mono">可在设置中填入 API Key 开启实盘</span>
         </div>
       )}
+
+      {/* Real-Time Live Quant Performance Monitor (Sharpe Ratio & Max Drawdown) */}
+      <LivePerformanceMonitor status={status} />
 
       {/* Server Hardware & Internal Scheduling Dashboard */}
       <ServerSystemDashboard status={status} />

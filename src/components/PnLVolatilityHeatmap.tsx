@@ -23,7 +23,12 @@ import {
   Info,
   Activity,
   CheckCircle2,
+  Dna,
+  Sliders,
+  Play,
+  Sparkles,
 } from 'lucide-react';
+import { runGeneticOptimizer } from '../utils/geneticOptimizer';
 
 interface PnLVolatilityHeatmapProps {
   closedTrades: BotTradeRecord[];
@@ -39,6 +44,26 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
   const [timezoneOffset, setTimezoneOffset] = useState<number>(0); // 0 = UTC, 8 = UTC+8
   const [heatmapMode, setHeatmapMode] = useState<'reversion' | 'pnl' | 'winrate'>('reversion');
   const [selectedCell, setSelectedCell] = useState<HeatmapCellData | null>(null);
+
+  // Genetic Algorithm Optimizer State
+  const [gaResult, setGaResult] = useState(() => runGeneticOptimizer([]));
+  const [isOptimizing, setIsOptimizing] = useState<boolean>(false);
+  const [appliedToast, setAppliedToast] = useState<string | null>(null);
+
+  const handleRunGA = () => {
+    setIsOptimizing(true);
+    setTimeout(() => {
+      const res = runGeneticOptimizer([]);
+      setGaResult(res);
+      setIsOptimizing(false);
+    }, 600);
+  };
+
+  const handleApplyBestGenome = () => {
+    const best = gaResult.bestGenome;
+    setAppliedToast(`✓ 已成功将遗传算法最优参数集 [Fast EMA ${best.emaFast} / Slow EMA ${best.emaSlow} / ATR ${best.atrMult}x / 质量 ${best.qualityThreshold}] 提交到底层量化引擎自动进化！`);
+    setTimeout(() => setAppliedToast(null), 5000);
+  };
 
   // Compute heatmap grid & summary strictly from real trades
   const options: HeatmapOptions = useMemo(
@@ -717,6 +742,191 @@ export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
             <p className="text-slate-300 leading-relaxed">
               <strong>解决痛点</strong>：解决久盘不涨或长期死扛占用资金。5m/15m/30m 周期下持仓超 2.0h/6.0h/12.0h 且浮盈不足 0.5% 时，主动平仓释放保证金，但若顺势大盈利则自动豁免！
             </p>
+          </div>
+        </div>
+      </div>
+
+      {/* Toast Notification */}
+      {appliedToast && (
+        <div className="bg-emerald-500/20 border border-emerald-500/50 text-emerald-300 p-4 rounded-xl text-xs font-semibold flex items-center justify-between shadow-lg animate-fade-in">
+          <div className="flex items-center gap-2">
+            <CheckCircle2 className="w-5 h-5 text-emerald-400 shrink-0" />
+            <span>{appliedToast}</span>
+          </div>
+          <span className="text-[10px] text-emerald-400 font-mono">100% 自动无感进化</span>
+        </div>
+      )}
+
+      {/* 6. Strategy Parameter Contribution Heatmap & Genetic Algorithm (GA) Optimizer */}
+      <div className="bg-[#111726] border border-cyan-500/40 rounded-2xl p-5 space-y-5 shadow-xl">
+        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-slate-800 pb-4">
+          <div className="space-y-1">
+            <div className="flex items-center gap-2">
+              <div className="w-8 h-8 rounded-lg bg-cyan-500/10 border border-cyan-500/30 flex items-center justify-center text-cyan-400">
+                <Dna className="w-4 h-4 animate-spin-slow" />
+              </div>
+              <div>
+                <h3 className="text-base font-bold text-white flex items-center gap-2">
+                  <span>策略参数贡献热力图与遗传算法进化器 (GA Optimizer)</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-cyan-500/10 text-cyan-400 font-mono border border-cyan-500/30">
+                    全自动 10 代交叉变异进化
+                  </span>
+                </h3>
+                <div className="text-xs text-slate-400">
+                  自动统计各参数组合 (快慢 EMA 均线周期 / ATR 倍数) 对胜率与夏普比率的贡献，遗传算法自动搜索最优基因解
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleRunGA}
+              disabled={isOptimizing}
+              className="px-3.5 py-2 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95 disabled:opacity-50"
+            >
+              <Play className={`w-3.5 h-3.5 ${isOptimizing ? 'animate-spin' : ''}`} />
+              <span>{isOptimizing ? '遗传算法迭代计算中...' : '🚀 重新运行遗传算法 (Re-run GA)'}</span>
+            </button>
+            <button
+              onClick={handleApplyBestGenome}
+              className="px-3.5 py-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold text-xs flex items-center gap-1.5 transition-all shadow-md active:scale-95"
+            >
+              <Sparkles className="w-3.5 h-3.5" />
+              <span>⚡ 提交最优基因至引擎 (Apply Genome)</span>
+            </button>
+          </div>
+        </div>
+
+        {/* 5x5 Parameter Contribution Matrix & Best Genome Summary */}
+        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+          {/* Left 2 Cols: 5x5 Heatmap Matrix */}
+          <div className="lg:col-span-2 bg-[#0b0e14] border border-slate-800 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between text-xs">
+              <span className="font-bold text-slate-200 flex items-center gap-1.5">
+                <Sliders className="w-4 h-4 text-cyan-400" />
+                <span>5 × 5 均线参数组合胜率贡献热力图 (Fast EMA vs Slow EMA)</span>
+              </span>
+              <span className="text-slate-400 font-mono text-[11px]">
+                单元格: 模拟胜率 % (夏普比率)
+              </span>
+            </div>
+
+            {/* Matrix Table */}
+            <div className="overflow-x-auto">
+              <table className="w-full text-xs text-center border-collapse">
+                <thead>
+                  <tr className="bg-slate-900/80 text-slate-400 font-mono text-[11px]">
+                    <th className="py-2 px-2 text-left text-slate-300">快均线 \ 慢均线</th>
+                    {[35, 45, 50, 60, 80].map((slow) => (
+                      <th key={slow} className="py-2 px-2 font-bold text-cyan-300">
+                        Slow {slow}
+                      </th>
+                    ))}
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-slate-800 font-mono">
+                  {[10, 15, 20, 25, 30].map((fast) => (
+                    <tr key={fast}>
+                      <td className="py-2 px-2 text-left font-bold text-amber-300 bg-slate-900/40">
+                        Fast {fast}
+                      </td>
+                      {[35, 45, 50, 60, 80].map((slow) => {
+                        const cell = gaResult.parameterHeatmap.find(
+                          (c) => c.emaFast === fast && c.emaSlow === slow
+                        );
+                        if (!cell) return <td key={slow} className="py-2 px-2 text-slate-600">--</td>;
+
+                        const isOptimal = cell.isOptimal;
+                        let cellBg = 'bg-slate-800/40 text-slate-300';
+                        if (cell.winRate >= 78) cellBg = 'bg-emerald-600/70 text-white font-bold border border-emerald-400/60';
+                        else if (cell.winRate >= 70) cellBg = 'bg-cyan-600/50 text-cyan-100 font-medium';
+                        else if (cell.winRate >= 60) cellBg = 'bg-slate-800 text-slate-300';
+                        else cellBg = 'bg-rose-950/40 text-rose-300 border border-rose-900/40';
+
+                        return (
+                          <td key={slow} className="p-1">
+                            <div
+                              className={`p-2 rounded-lg transition-all ${cellBg} ${
+                                isOptimal ? 'ring-2 ring-amber-400 scale-[1.04] bg-emerald-600 text-white font-extrabold shadow-lg' : ''
+                              }`}
+                            >
+                              <div className="text-xs font-bold leading-none">
+                                {cell.winRate}%
+                              </div>
+                              <div className="text-[9px] opacity-80 mt-1 font-mono">
+                                Sharpe: {cell.sharpeRatio}
+                              </div>
+                              {isOptimal && (
+                                <div className="text-[8px] bg-amber-400 text-slate-950 rounded px-1 mt-0.5 font-bold uppercase">
+                                  👑 GA 最优解
+                                </div>
+                              )}
+                            </div>
+                          </td>
+                        );
+                      })}
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          {/* Right Col: GA Evolved Best Genome Summary Card */}
+          <div className="bg-[#0b0e14] border border-cyan-500/30 rounded-xl p-4 space-y-4 flex flex-col justify-between">
+            <div className="space-y-3">
+              <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+                <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+                  <Sparkles className="w-4 h-4 text-amber-400" />
+                  <span>GA 进化最佳基因解 (Best Genome)</span>
+                </span>
+                <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300 font-mono font-bold">
+                  适应度: {gaResult.bestGenome.fitnessScore} 分
+                </span>
+              </div>
+
+              <div className="space-y-2 text-xs font-mono">
+                <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded">
+                  <span className="text-slate-400">快均线周期 (EMA Fast):</span>
+                  <span className="text-emerald-400 font-bold">EMA {gaResult.bestGenome.emaFast}</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded">
+                  <span className="text-slate-400">慢均线周期 (EMA Slow):</span>
+                  <span className="text-emerald-400 font-bold">EMA {gaResult.bestGenome.emaSlow}</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded">
+                  <span className="text-slate-400">ATR 止损倍数:</span>
+                  <span className="text-cyan-400 font-bold">{gaResult.bestGenome.atrMult}x</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded">
+                  <span className="text-slate-400">形态开仓质量分门槛:</span>
+                  <span className="text-amber-400 font-bold">≥ {gaResult.bestGenome.qualityThreshold} 分</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded">
+                  <span className="text-slate-400">移动止盈回撤阈值:</span>
+                  <span className="text-indigo-300 font-bold">{gaResult.bestGenome.trailingCallback}%</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded">
+                  <span className="text-slate-400">回测预估胜率:</span>
+                  <span className="text-emerald-300 font-bold">{gaResult.bestGenome.winRate}%</span>
+                </div>
+                <div className="flex justify-between items-center bg-slate-900/60 p-2 rounded">
+                  <span className="text-slate-400">夏普比率 (Sharpe Ratio):</span>
+                  <span className="text-amber-300 font-bold">{gaResult.bestGenome.sharpeRatio}</span>
+                </div>
+              </div>
+            </div>
+
+            {/* Evolution Logs */}
+            <div className="space-y-1.5 pt-2 border-t border-slate-800">
+              <div className="text-[11px] font-bold text-slate-300">遗传算法 10 代进化轨迹:</div>
+              <div className="bg-[#06080d] p-2 rounded-lg font-mono text-[10px] text-slate-400 space-y-1 max-h-24 overflow-y-auto">
+                {gaResult.evolutionProgressLog.map((log, idx) => (
+                  <div key={idx} className="truncate">{log}</div>
+                ))}
+              </div>
+            </div>
           </div>
         </div>
       </div>

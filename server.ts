@@ -104,6 +104,15 @@ app.post('/api/bot/config', requireAuth, (req, res) => {
   res.json({ success: true, message: '配置已更新', status: botEngine.getStatus() });
 });
 
+// Protected Test Emergency Notification Route
+app.post('/api/bot/test-notification', requireAuth, async (req, res) => {
+  const sent = await botEngine.sendEmergencyNotification(
+    '手动测试紧急风控预警推送',
+    '此消息为手动测试紧急风控预警推送接口，证明 Telegram Bot / Webhook 告警通道已成功通畅挂载！'
+  );
+  res.json({ success: true, sent, status: botEngine.getStatus() });
+});
+
 // Protected Add Monitored Symbol
 app.post('/api/bot/symbols/add', requireAuth, (req, res) => {
   const { symbol } = req.body || {};

@@ -68,6 +68,14 @@ export type StopLossMode = 'PERCENT' | 'ATR' | 'NONE';
 export type TakeProfitMode = 'PERCENT' | 'RISK_REWARD' | 'NONE';
 export type PositionSizeMode = 'EQUITY_PERCENT' | 'FIXED_AMOUNT' | 'RISK_PARITY_ATR';
 
+export interface NotificationConfig {
+  enableEmergencyAlerts: boolean;
+  telegramBotToken?: string;
+  telegramChatId?: string;
+  webhookUrl?: string;
+  lastAlertTimestamp?: number;
+}
+
 export interface RiskManagementConfig {
   slMode: StopLossMode;
   slPercent: number;
@@ -82,6 +90,11 @@ export interface RiskManagementConfig {
   trailingCallbackPercent: number;
   trailingStepPercent?: number;
   trailingActivationUsdt?: number;
+
+  autoBreakevenEnabled?: boolean;
+  autoBreakevenDynamicPercent?: number;
+  autoBreakevenUsdt?: number;
+  notification?: NotificationConfig;
 
   sizingMode: PositionSizeMode;
   positionSizePercent: number;
@@ -210,6 +223,75 @@ export interface PatternLearningItem {
   bestTimeframe: string;
   bestSession: string;
   status: 'OPTIMAL_HIGH_CONVICTION' | 'LEARNING_ACTIVE' | 'DECAY_PRUNED';
+  lastUpdated: number;
+}
+
+export interface SymbolRiskControlItem {
+  symbol: string;
+  sharpeRatio: number;
+  maxDrawdownPercent: number;
+  totalTrades: number;
+  winRate: number;
+  riskLevel: 'SAFE_NORMAL' | 'WARNING_REDUCE_LEVERAGE' | 'CRITICAL_CAP_POSITIONS';
+  effectiveLeverage: number;
+  maxAllowedPositions: number;
+  actionDescription: string;
+}
+
+export interface ParameterContributionCell {
+  emaFast: number;
+  emaSlow: number;
+  winRate: number;
+  profitFactor: number;
+  simulatedTradesCount: number;
+  sharpeRatio: number;
+  isOptimal: boolean;
+}
+
+export interface GeneticGenome {
+  id: string;
+  emaFast: number;
+  emaSlow: number;
+  atrMult: number;
+  qualityThreshold: number;
+  trailingCallback: number;
+  fitnessScore: number;
+  winRate: number;
+  sharpeRatio: number;
+  maxDrawdown: number;
+}
+
+export interface GeneticOptimizerResult {
+  generationCount: number;
+  bestGenome: GeneticGenome;
+  population: GeneticGenome[];
+  parameterHeatmap: ParameterContributionCell[];
+  evolutionProgressLog: string[];
+  lastOptimizedTime: number;
+}
+
+export interface MarketCorrelationMetrics {
+  avgVolatilityRatio: number;
+  correlationScore: number;
+  isCircuitBreakerActive: boolean;
+  circuitBreakerReason: string;
+  safeLevelLeverage: number;
+  maxAllowedAccountPositions: number;
+  recommendedAction: string;
+  lastEvaluatedTime: number;
+}
+
+export interface SymbolSensitivityRLState {
+  symbol: string;
+  sensitivityScore: number;
+  qualityScoreThreshold: number;
+  atrMultiplier: number;
+  rlGeneration: number;
+  sharpeRatio: number;
+  winRate: number;
+  maxDrawdown: number;
+  rlAction: 'ELEVATE_SENSITIVITY' | 'MAINTAIN' | 'RESTRICT_SENSITIVITY';
+  statusDescription: string;
   lastUpdated: number;
 }
 
