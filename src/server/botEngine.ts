@@ -49,6 +49,8 @@ export interface ActivePosition {
   liquidationPrice: number;
   strategyUsed: StrategyKey;
   binanceOrderId?: string;
+  stopLossOrderId?: string;
+  takeProfitOrderId?: string;
   isPaper: boolean;
 }
 
@@ -330,6 +332,82 @@ class TradingEngine {
       throw new Error(data.msg || `Binance API HTTP ${res.status}`);
     }
     return { orderId: String(data.orderId) };
+  }
+
+  /**
+   * Place direct exchange-level conditional orders on Binance Futures (STOP_MARKET or TAKE_PROFIT_MARKET)
+   * Execution is handled directly by Binance matching engine matching memory with 0ms local latency
+   */
+  private async placeBinanceConditionalOrder(
+    symbol: string,
+    side: 'BUY' | 'SELL',
+    type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET',
+    stopPrice: number
+  ): Promise<{ orderId: string } | null> {
+    if (!this.hasApiCredentials()) return null;
+
+    try {
+      // Determine price precision: BTC/ETH use 2 decimals, others 3~4
+      const pricePrecision = symbol.startsWith('BTC') || symbol.startsWith('ETH') ? 2 : 4;
+      const formattedPrice = Number(stopPrice.toFixed(pricePrecision));
+
+      const timestamp = Date.now();
+      const qs = `symbol=${symbol}&side=${side}&type=${type}&stopPrice=${formattedPrice}&closePosition=true&timestamp=${timestamp}&recvWindow=5000`;
+      const sig = this.signQuery(qs);
+
+      const res = await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/order?${qs}&signature=${sig}`, {
+        method: 'POST',
+        headers: { 'X-MBX-APIKEY': this.apiKey },
+      });
+
+      const data = await res.json();
+      if (!res.ok) {
+        this.addLog('warn', 'API', `交易所直挂条件单提示 (${type} @ ${formattedPrice}): ${data.msg || res.status}`);
+        return null;
+      }
+      return { orderId: String(data.orderId) };
+    } catch (err: any) {
+      this.addLog('warn', 'API', `提交交易所直挂单异常: ${err.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Cancel specific order on Binance Futures
+   */
+  private async cancelBinanceOrder(symbol: string, orderId: string): Promise<void> {
+    if (!this.hasApiCredentials() || !orderId) return;
+    try {
+      const timestamp = Date.now();
+      const qs = `symbol=${symbol}&orderId=${orderId}&timestamp=${timestamp}&recvWindow=5000`;
+      const sig = this.signQuery(qs);
+
+      await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/order?${qs}&signature=${sig}`, {
+        method: 'DELETE',
+        headers: { 'X-MBX-APIKEY': this.apiKey },
+      });
+    } catch {
+      // ignore
+    }
+  }
+
+  /**
+   * Cancel all open conditional orders for symbol on Binance Futures
+   */
+  private async cancelAllBinanceOrders(symbol: string): Promise<void> {
+    if (!this.hasApiCredentials()) return;
+    try {
+      const timestamp = Date.now();
+      const qs = `symbol=${symbol}&timestamp=${timestamp}&recvWindow=5000`;
+      const sig = this.signQuery(qs);
+
+      await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/allOpenOrders?${qs}&signature=${sig}`, {
+        method: 'DELETE',
+        headers: { 'X-MBX-APIKEY': this.apiKey },
+      });
+    } catch {
+      // ignore
+    }
   }
 
   public computePatternStats(): PatternStatItem[] {
@@ -658,16 +736,36 @@ class TradingEngine {
                 }
               }
 
-              // 2. Early Breakeven Stop (即时成本防守线: 浮盈只要达到 >= 15 USDT 或 1.0%，立即无条件拉升止损至成本价上方)
+              // 2. Early Breakeven Stop (即时成本防守线: 浮盈只要达到 >= 15 USDT 或 1.0%，立即无条件拉升止损至成本价上方，并同步更新交易所直挂止损单)
               if (pos.peakPnlUsdt >= 15 || pos.unrealizedPnlPercent >= 1.0) {
                 const safeCostLong = pos.entryPrice * 1.0015;
                 const safeCostShort = pos.entryPrice * 0.9985;
+                let moved = false;
                 if (pos.side === 'LONG' && (pos.stopLossPrice === null || pos.stopLossPrice < safeCostLong)) {
                   pos.stopLossPrice = safeCostLong;
+                  moved = true;
                   this.addLog('info', 'ORDER', `🛡️ [${symbol}] 浮盈已达标，止损线自动提至保本盈利位 ($${safeCostLong.toFixed(2)})，彻底封死亏损风险！`, symbol);
                 } else if (pos.side === 'SHORT' && (pos.stopLossPrice === null || pos.stopLossPrice > safeCostShort)) {
                   pos.stopLossPrice = safeCostShort;
+                  moved = true;
                   this.addLog('info', 'ORDER', `🛡️ [${symbol}] 浮盈已达标，止损线自动下调至保本盈利位 ($${safeCostShort.toFixed(2)})，彻底封死亏损风险！`, symbol);
+                }
+
+                // 同步更新币安交易所上的 STOP_MARKET 挂单
+                if (moved && !pos.isPaper && this.hasApiCredentials() && pos.stopLossPrice) {
+                  if (pos.stopLossOrderId) {
+                    await this.cancelBinanceOrder(symbol, pos.stopLossOrderId);
+                  }
+                  const newSl = await this.placeBinanceConditionalOrder(
+                    symbol,
+                    pos.side === 'LONG' ? 'SELL' : 'BUY',
+                    'STOP_MARKET',
+                    pos.stopLossPrice
+                  );
+                  if (newSl?.orderId) {
+                    pos.stopLossOrderId = newSl.orderId;
+                    this.addLog('info', 'API', `⚡ [币安交易所保本挂单更新成功] 新止损价: $${pos.stopLossPrice.toFixed(2)} (单号 #${newSl.orderId})`, symbol);
+                  }
                 }
               }
 
@@ -853,6 +951,40 @@ class TradingEngine {
                     ? currentPrice * (1 - 1 / leverage + mmr)
                     : currentPrice * (1 + 1 / leverage - mmr);
 
+                // Direct Exchange-Level Conditional Orders (交易所撮合引擎直挂止损与止盈)
+                let stopLossOrderId: string | undefined;
+                let takeProfitOrderId: string | undefined;
+
+                if (hasKeys) {
+                  // A. 直挂交易所 STOP_MARKET 止损单
+                  if (stopLossPrice !== null && stopLossPrice > 0) {
+                    const slRes = await this.placeBinanceConditionalOrder(
+                      symbol,
+                      side === 'LONG' ? 'SELL' : 'BUY',
+                      'STOP_MARKET',
+                      stopLossPrice
+                    );
+                    if (slRes?.orderId) {
+                      stopLossOrderId = slRes.orderId;
+                      this.addLog('info', 'API', `⚡ [币安交易所直挂止损单 OK] 止损价: $${stopLossPrice.toFixed(2)} (单号 #${slRes.orderId})`, symbol);
+                    }
+                  }
+
+                  // B. 直挂交易所 TAKE_PROFIT_MARKET 止盈单
+                  if (takeProfitPrice !== null && takeProfitPrice > 0) {
+                    const tpRes = await this.placeBinanceConditionalOrder(
+                      symbol,
+                      side === 'LONG' ? 'SELL' : 'BUY',
+                      'TAKE_PROFIT_MARKET',
+                      takeProfitPrice
+                    );
+                    if (tpRes?.orderId) {
+                      takeProfitOrderId = tpRes.orderId;
+                      this.addLog('info', 'API', `⚡ [币安交易所直挂止盈单 OK] 目标价: $${takeProfitPrice.toFixed(2)} (单号 #${tpRes.orderId})`, symbol);
+                    }
+                  }
+                }
+
                 const newPosition: ActivePosition = {
                   id: `pos_${symbol}_${Date.now()}`,
                   symbol,
@@ -876,6 +1008,8 @@ class TradingEngine {
                   liquidationPrice: Math.max(0, liqPrice),
                   strategyUsed: 'pattern_price_action',
                   binanceOrderId,
+                  stopLossOrderId,
+                  takeProfitOrderId,
                   isPaper: !hasKeys,
                 };
 
@@ -884,7 +1018,7 @@ class TradingEngine {
                 this.addLog(
                   'success',
                   'ORDER',
-                  `🚀 [${hasKeys ? '实盘开单' : '模拟观察记录'}] ${symbol} (${interval}) 识别到【${patternTitle}】(${matchedPattern.type}) -> ${side} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}${binanceOrderId ? `，订单 #${binanceOrderId}` : ''})`,
+                  `🚀 [${hasKeys ? '实盘开单' : '模拟观察记录'}] ${symbol} (${interval}) 识别到【${patternTitle}】(${matchedPattern.type}) -> ${side} @ ${currentPrice} USDT (杠杆 ${leverage}x，保证金 $${allocatedMargin.toFixed(1)}${binanceOrderId ? `，主订单 #${binanceOrderId}` : ''}${stopLossOrderId ? `，交易所止损单 #${stopLossOrderId}` : ''}${takeProfitOrderId ? `，交易所止盈单 #${takeProfitOrderId}` : ''})`,
                   symbol
                 );
               }
@@ -937,14 +1071,20 @@ class TradingEngine {
   private async closePosition(pos: ActivePosition, exitPrice: number, exitReason: ExitReason) {
     if (pos.isPaper === false && this.hasApiCredentials()) {
       try {
-        await this.placeBinanceMarketOrder(
-          pos.symbol,
-          pos.side === 'LONG' ? 'SELL' : 'BUY',
-          pos.quantity,
-          true
-        );
+        // 1. 如果是策略平仓或追踪止盈，发送市价平仓单
+        if (exitReason !== 'STOP_LOSS' && exitReason !== 'TAKE_PROFIT') {
+          await this.placeBinanceMarketOrder(
+            pos.symbol,
+            pos.side === 'LONG' ? 'SELL' : 'BUY',
+            pos.quantity,
+            true
+          );
+        }
+
+        // 2. 撤销币安交易所挂着的对应条件单（防止平仓后残留挂单导致反向开仓）
+        await this.cancelAllBinanceOrders(pos.symbol);
       } catch (err: any) {
-        this.addLog('error', 'API', `币安实盘平仓请求异常: ${err.message}`, pos.symbol);
+        this.addLog('error', 'API', `币安实盘平仓/撤挂单异常: ${err.message}`, pos.symbol);
       }
     }
 
