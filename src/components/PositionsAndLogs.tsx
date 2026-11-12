@@ -114,7 +114,14 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                 </div>
 
                 <div className="flex items-center justify-between pt-1 text-xs">
-                  <span className="text-slate-400">未实现净盈亏:</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-slate-400">实时盈亏:</span>
+                    {(pos.peakPnlUsdt || 0) > 0 && (
+                      <span className="text-[10px] text-amber-300 font-mono bg-amber-500/10 px-1.5 py-0.5 rounded">
+                        最高触及 +${pos.peakPnlUsdt.toFixed(1)}
+                      </span>
+                    )}
+                  </div>
                   <strong
                     className={`font-mono text-sm ${
                       pos.unrealizedPnl >= 0 ? 'text-emerald-400' : 'text-rose-400'

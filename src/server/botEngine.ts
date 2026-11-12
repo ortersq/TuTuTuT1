@@ -42,6 +42,7 @@ export interface ActivePosition {
   marginUsed: number;
   unrealizedPnl: number;
   unrealizedPnlPercent: number;
+  peakPnlUsdt: number;
   stopLossPrice: number | null;
   takeProfitPrice: number | null;
   trailingPeakPrice: number;
@@ -612,6 +613,10 @@ class TradingEngine {
               }
               pos.unrealizedPnlPercent = (pos.unrealizedPnl / pos.marginUsed) * 100;
 
+              if (pos.unrealizedPnl > (pos.peakPnlUsdt || 0)) {
+                pos.peakPnlUsdt = pos.unrealizedPnl;
+              }
+
               if (pos.side === 'LONG' && currentPrice > pos.trailingPeakPrice) {
                 pos.trailingPeakPrice = currentPrice;
               } else if (pos.side === 'SHORT' && currentPrice < pos.trailingPeakPrice) {
@@ -620,7 +625,53 @@ class TradingEngine {
 
               let exitTriggered: ExitReason | null = null;
 
-              // 1. Strategy Pattern Structural Invalidation Check (策略形态结构失效平仓)
+              // 1. Profit Protection Exit (利润保护熔断锁利，彻底根治盈利30~80USDT后倒亏的严重痛点)
+              // 规则：
+              // A. 浮盈曾达到 >= 50 USDT，若利润回吐超过 35% (保留至少 65% 利润)，立即止盈平仓！
+              // B. 浮盈曾达到 >= 25 USDT，若利润回吐超过 45% (保留至少 55% 利润)，立即止盈平仓！
+              // C. 任何单子只要浮盈曾达到过 >= 20 USDT，净利润绝不允许跌破 +8 USDT 保底盈利！
+              if (!exitTriggered && pos.peakPnlUsdt >= 20) {
+                if (pos.peakPnlUsdt >= 50 && pos.unrealizedPnl <= pos.peakPnlUsdt * 0.65) {
+                  exitTriggered = 'PROFIT_PROTECT_EXIT';
+                  this.addLog(
+                    'success',
+                    'ORDER',
+                    `💰 [${symbol} 利润保护止盈] 浮盈曾达到 $${pos.peakPnlUsdt.toFixed(1)}，回撤触及防线，锁定当前 +$${pos.unrealizedPnl.toFixed(1)} 利润果断平仓！`,
+                    symbol
+                  );
+                } else if (pos.peakPnlUsdt >= 25 && pos.unrealizedPnl <= pos.peakPnlUsdt * 0.55) {
+                  exitTriggered = 'PROFIT_PROTECT_EXIT';
+                  this.addLog(
+                    'success',
+                    'ORDER',
+                    `💰 [${symbol} 利润保护止盈] 浮盈曾达到 $${pos.peakPnlUsdt.toFixed(1)}，锁定当前 +$${pos.unrealizedPnl.toFixed(1)} 利润平仓，杜绝倒亏！`,
+                    symbol
+                  );
+                } else if (pos.unrealizedPnl <= 8) {
+                  exitTriggered = 'PROFIT_PROTECT_EXIT';
+                  this.addLog(
+                    'success',
+                    'ORDER',
+                    `🛡️ [${symbol} 底线锁利保护] 浮盈曾触及 $${pos.peakPnlUsdt.toFixed(1)}，回吐逼近成本，守住底线 +$${pos.unrealizedPnl.toFixed(1)} 平仓！`,
+                    symbol
+                  );
+                }
+              }
+
+              // 2. Early Breakeven Stop (即时成本防守线: 浮盈只要达到 >= 15 USDT 或 1.0%，立即无条件拉升止损至成本价上方)
+              if (pos.peakPnlUsdt >= 15 || pos.unrealizedPnlPercent >= 1.0) {
+                const safeCostLong = pos.entryPrice * 1.0015;
+                const safeCostShort = pos.entryPrice * 0.9985;
+                if (pos.side === 'LONG' && (pos.stopLossPrice === null || pos.stopLossPrice < safeCostLong)) {
+                  pos.stopLossPrice = safeCostLong;
+                  this.addLog('info', 'ORDER', `🛡️ [${symbol}] 浮盈已达标，止损线自动提至保本盈利位 ($${safeCostLong.toFixed(2)})，彻底封死亏损风险！`, symbol);
+                } else if (pos.side === 'SHORT' && (pos.stopLossPrice === null || pos.stopLossPrice > safeCostShort)) {
+                  pos.stopLossPrice = safeCostShort;
+                  this.addLog('info', 'ORDER', `🛡️ [${symbol}] 浮盈已达标，止损线自动下调至保本盈利位 ($${safeCostShort.toFixed(2)})，彻底封死亏损风险！`, symbol);
+                }
+              }
+
+              // 3. Strategy Pattern Structural Invalidation Check (策略形态结构失效平仓)
               if (!exitTriggered && e20 !== null && e50 !== null) {
                 if (pos.patternType === 'BROOKS_H2_LONG' && currentPrice < e50 * 0.998) {
                   exitTriggered = 'PATTERN_INVALIDATED';
@@ -631,7 +682,7 @@ class TradingEngine {
                 }
               }
 
-              // 2. Liquidation Check
+              // 4. Liquidation Check
               if (!exitTriggered) {
                 if (pos.side === 'LONG' && currentPrice <= pos.liquidationPrice) {
                   exitTriggered = 'LIQUIDATION';
@@ -640,38 +691,39 @@ class TradingEngine {
                 }
               }
 
-              // 3. Structural Stop Loss (形态极值止损)
+              // 5. Structural Stop Loss (形态极值止损)
               if (!exitTriggered && pos.stopLossPrice !== null) {
                 if (pos.side === 'LONG' && currentPrice <= pos.stopLossPrice) exitTriggered = 'STOP_LOSS';
                 else if (pos.side === 'SHORT' && currentPrice >= pos.stopLossPrice) exitTriggered = 'STOP_LOSS';
               }
 
-              // 4. Structural Take Profit (形态结构目标止盈: 2.2x~2.5x 盈亏比)
+              // 6. Structural Take Profit (形态结构目标止盈: 2.2x~2.5x 盈亏比)
               if (!exitTriggered && pos.takeProfitPrice !== null) {
                 if (pos.side === 'LONG' && currentPrice >= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
                 else if (pos.side === 'SHORT' && currentPrice <= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
               }
 
-              // 5. Trailing Profit Protection (移动追踪锁利: 盈利达标后保护利润)
-              if (!exitTriggered && this.riskConfig.useTrailingStop && this.riskConfig.trailingCallbackPercent > 0) {
-                const cb = this.riskConfig.trailingCallbackPercent / 100;
+              // 7. Dynamic Trailing Profit Protection (高灵敏移动追踪止盈: 回撤达到 0.4%~0.6% 锁利)
+              if (!exitTriggered && this.riskConfig.useTrailingStop) {
+                // 只要价格上涨超过 0.6%，就启动高灵敏追踪，允许回撤 0.45%
+                const triggerThreshold = 0.006;
+                const callbackRate = 0.0045;
                 if (pos.side === 'LONG') {
                   const gain = (pos.trailingPeakPrice - pos.entryPrice) / pos.entryPrice;
-                  if (gain >= cb && currentPrice <= pos.trailingPeakPrice * (1 - cb)) {
+                  if (gain >= triggerThreshold && currentPrice <= pos.trailingPeakPrice * (1 - callbackRate)) {
                     exitTriggered = 'TRAILING_STOP';
                   }
                 } else {
                   const gain = (pos.entryPrice - pos.trailingPeakPrice) / pos.entryPrice;
-                  if (gain >= cb && currentPrice >= pos.trailingPeakPrice * (1 + cb)) {
+                  if (gain >= triggerThreshold && currentPrice >= pos.trailingPeakPrice * (1 + callbackRate)) {
                     exitTriggered = 'TRAILING_STOP';
                   }
                 }
               }
 
-              // 6. Strategy-Adaptive Momentum Decay Exit (策略-形态协同动能衰竭平仓)
-              // 关键突破：若持仓处于顺势盈利中(浮盈 >= 0.5%)，绝不按时间一刀切平仓！自动放宽时间让策略继续奔向 Take Profit！
+              // 8. Strategy-Adaptive Momentum Decay Exit (策略-形态协同动能衰竭平仓)
               const holdingHours = (Date.now() - pos.entryTime) / (1000 * 3600);
-              const maxThresholdHours = pos.interval === '5m' ? 2.5 : pos.interval === '15m' ? 8.0 : 16.0;
+              const maxThresholdHours = pos.interval === '5m' ? 2.0 : pos.interval === '15m' ? 6.0 : 12.0;
 
               if (!exitTriggered && holdingHours >= maxThresholdHours) {
                 if (pos.unrealizedPnlPercent >= 0.5) {
@@ -679,18 +731,6 @@ class TradingEngine {
                 } else {
                   exitTriggered = 'MOMENTUM_DECAY_TIMEOUT';
                   this.addLog('warn', 'ORDER', `⌛ [${symbol} ${pos.interval}] 形态【${pos.patternName}】推演超 ${holdingHours.toFixed(1)}h 且动能衰竭未果，智能平仓释放资金！`, symbol);
-                }
-              }
-
-              // 7. Time-based Breakeven Protection (持仓 45min 且盈利 > 0.3% 时自动移动止损至保本价)
-              if (!exitTriggered && holdingHours >= 0.75 && pos.unrealizedPnlPercent >= 0.3) {
-                const breakevenSl = pos.side === 'LONG' ? pos.entryPrice * 1.001 : pos.entryPrice * 0.999;
-                if (pos.side === 'LONG' && (pos.stopLossPrice === null || pos.stopLossPrice < breakevenSl)) {
-                  pos.stopLossPrice = breakevenSl;
-                  this.addLog('info', 'ORDER', `🛡️ [${symbol}] 形态运行顺畅且盈利中，自动将止损提升至保本价 ($${breakevenSl.toFixed(2)})！`, symbol);
-                } else if (pos.side === 'SHORT' && (pos.stopLossPrice === null || pos.stopLossPrice > breakevenSl)) {
-                  pos.stopLossPrice = breakevenSl;
-                  this.addLog('info', 'ORDER', `🛡️ [${symbol}] 形态运行顺畅且盈利中，自动将止损下调至保本价 ($${breakevenSl.toFixed(2)})！`, symbol);
                 }
               }
 
@@ -829,6 +869,7 @@ class TradingEngine {
                   marginUsed: allocatedMargin,
                   unrealizedPnl: 0,
                   unrealizedPnlPercent: 0,
+                  peakPnlUsdt: 0,
                   stopLossPrice,
                   takeProfitPrice,
                   trailingPeakPrice: currentPrice,
