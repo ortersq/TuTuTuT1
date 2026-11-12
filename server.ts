@@ -61,6 +61,31 @@ app.get('/api/bot/status', requireAuth, (req, res) => {
   res.json(botEngine.getStatus());
 });
 
+// Downloadable Full Diagnostic & Log Export Endpoint
+app.get('/api/bot/export-diagnostic-logs', requireAuth, (req, res) => {
+  const status = botEngine.getStatus();
+  const exportData = {
+    exportTime: new Date().toISOString(),
+    systemMetrics: status.systemMetrics,
+    learningGeneration: status.learningGeneration,
+    patternLearningStats: status.patternLearningStats,
+    timeframeDiagnostic: status.timeframeDiagnostic,
+    monitoredSymbols: status.monitoredSymbols,
+    monitoredTimeframes: status.monitoredTimeframes,
+    riskConfig: status.riskConfig,
+    activePositions: status.activePositions,
+    closedTrades: status.closedTrades,
+    logs: status.logs,
+  };
+
+  res.setHeader('Content-Type', 'application/json');
+  res.setHeader(
+    'Content-Disposition',
+    `attachment; filename=binance_quant_diagnostic_${Date.now()}.json`
+  );
+  res.send(JSON.stringify(exportData, null, 2));
+});
+
 // Protected Bot Start
 app.post('/api/bot/start', requireAuth, (req, res) => {
   botEngine.start();

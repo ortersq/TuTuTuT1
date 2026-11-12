@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { LogEntry } from '../server/botEngine';
-import { Terminal, Search, Trash2, Filter } from 'lucide-react';
+import { Terminal, Search, Trash2, Filter, Download } from 'lucide-react';
 
 interface SystemLogConsoleProps {
   logs: LogEntry[];
@@ -11,6 +11,33 @@ export const SystemLogConsole: React.FC<SystemLogConsoleProps> = ({ logs, onRefr
   const [selectedCategory, setSelectedCategory] = useState<string>('ALL');
   const [selectedLevel, setSelectedLevel] = useState<string>('ALL');
   const [searchQuery, setSearchQuery] = useState<string>('');
+  const [isExporting, setIsExporting] = useState<boolean>(false);
+
+  const handleExportLogs = async () => {
+    const token = localStorage.getItem('quant_auth_token');
+    if (!token) return;
+    setIsExporting(true);
+    try {
+      const res = await fetch('/api/bot/export-diagnostic-logs', {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const blob = await res.blob();
+        const url = window.URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `binance_quant_diagnostic_log_${Date.now()}.json`;
+        document.body.appendChild(a);
+        a.click();
+        a.remove();
+        window.URL.revokeObjectURL(url);
+      }
+    } catch {
+      // ignore
+    } finally {
+      setIsExporting(false);
+    }
+  };
 
   const filteredLogs = logs.filter((log) => {
     if (selectedCategory !== 'ALL' && log.category !== selectedCategory) return false;
@@ -88,6 +115,15 @@ export const SystemLogConsole: React.FC<SystemLogConsoleProps> = ({ logs, onRefr
               className="pl-8 pr-3 py-1.5 bg-[#0b0e14] border border-slate-800 rounded-xl text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-400 w-48 font-mono"
             />
           </div>
+
+          <button
+            onClick={handleExportLogs}
+            disabled={isExporting}
+            className="px-3 py-1.5 bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+          >
+            <Download className="w-3.5 h-3.5" />
+            <span>{isExporting ? '导出中...' : '📥 导出诊断日志包 (.json)'}</span>
+          </button>
 
           <button
             onClick={onRefresh}
