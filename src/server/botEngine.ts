@@ -1280,11 +1280,24 @@ class TradingEngine {
 
               const side: 'LONG' | 'SHORT' = latestSig === 1 ? 'LONG' : 'SHORT';
               const baseLeverage = this.leverage;
-              let leverage = baseLeverage;
 
-              if (matchedPattern.qualityScore >= 95) leverage = Math.min(125, Math.round(baseLeverage * 1.5));
-              else if (matchedPattern.qualityScore >= 90) leverage = Math.min(125, Math.round(baseLeverage * 1.25));
-              else if (matchedPattern.qualityScore < 85) leverage = Math.max(1, Math.round(baseLeverage * 0.8));
+              // Calculate ATR Volatility Ratio (Risk-Parity Volatility Scaling)
+              const avgAtr20 = klines.slice(-20).reduce((sum, k) => sum + (k.high - k.low), 0) / 20;
+              const volRatio = avgAtr20 > 0 ? currentAtr / avgAtr20 : 1.0;
+
+              let leverage = baseLeverage;
+              if (volRatio > 1.8) {
+                // High Volatility Spike -> Lower leverage to widen stop-loss buffer & prevent wick liquidation
+                leverage = Math.max(1, Math.round(baseLeverage * 0.65));
+                this.addLog('info', 'SIGNAL', `🛡️ [${symbol} 风险平价降杠杆] 当前波动率比率 ${volRatio.toFixed(2)}x (剧烈波动插针期)，杠杆调至 ${leverage}x 防扫损！`, symbol);
+              } else if (volRatio < 0.9 && matchedPattern.qualityScore >= 90) {
+                // Smooth Low-Noise Trend -> Safely elevate leverage to maximize breakout gains
+                leverage = Math.min(125, Math.round(baseLeverage * 1.25));
+              } else if (matchedPattern.qualityScore >= 95) {
+                leverage = Math.min(125, Math.round(baseLeverage * 1.5));
+              } else if (matchedPattern.qualityScore < 85) {
+                leverage = Math.max(1, Math.round(baseLeverage * 0.8));
+              }
 
               const patternTitle = matchedPattern.name;
               let stopLossPrice: number | null = matchedPattern.stopLossPrice ?? null;
