@@ -22,6 +22,7 @@ import {
   ServerSystemMetrics,
   StrategyKey,
   StrategyParams,
+  TimeframeDiagnosticReport,
 } from '../types/trading';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { calculateATR, calculateEMA } from '../utils/indicators';
@@ -152,6 +153,7 @@ export interface BotStatus {
   equityHistory: LiveEquityPoint[];
   learningGeneration: number;
   patternLearningStats: PatternLearningItem[];
+  timeframeDiagnostic: TimeframeDiagnosticReport;
   logs: LogEntry[];
   recentSchedulingEvents: LogEntry[];
   systemMetrics: ServerSystemMetrics;
@@ -757,6 +759,130 @@ class TradingEngine {
     }
   }
 
+  public getTimeframeDiagnosticReport(): TimeframeDiagnosticReport {
+    let latestAtrRatio = 1.0;
+    if (this.scanResults.length > 0) {
+      const atrs = this.scanResults.map((s) => s.atr).filter((a) => a > 0);
+      if (atrs.length > 0) {
+        const avg = atrs.reduce((a, b) => a + b, 0) / atrs.length;
+        latestAtrRatio = Number((atrs[0] / (avg || 1)).toFixed(2));
+      }
+    }
+
+    let currentRegime: 'LOW_VOLATILITY_CHOP' | 'NORMAL_TRENDING' | 'HIGH_VOLATILITY_BREAKOUT' | 'EXTREME_VOLATILITY_SPIKE' = 'NORMAL_TRENDING';
+    let regimeName = '🟢 稳健趋势波段 (Normal Trending)';
+    let regimeDescription = '大盘波幅平稳，趋势发散顺畅，突破与回踩模式均具备高可靠性。';
+
+    if (latestAtrRatio >= 2.0) {
+      currentRegime = 'EXTREME_VOLATILITY_SPIKE';
+      regimeName = '🔴 极度剧烈插针 (Extreme Volatility Spike)';
+      regimeDescription = '市场出现剧烈插针与暴跌恐慌，小周期噪音剧烈，需依靠大周期结构防御。';
+    } else if (latestAtrRatio >= 1.3) {
+      currentRegime = 'HIGH_VOLATILITY_BREAKOUT';
+      regimeName = '⚡ 高波动动能爆发 (High Volatility Breakout)';
+      regimeDescription = '动能加速放大，放量突破特征明显，适合中短周期快速跟进。';
+    } else if (latestAtrRatio <= 0.85) {
+      currentRegime = 'LOW_VOLATILITY_CHOP';
+      regimeName = '🟡 低波窄幅震荡 (Low Volatility Chop)';
+      regimeDescription = '成交量萎缩，盘面横盘无方向，小周期频繁假突破，宜选择大中周期过滤杂波。';
+    }
+
+    const allTimeframes = ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'];
+
+    const suitabilityMap: Record<string, Record<string, { score: number; desc: string }>> = {
+      LOW_VOLATILITY_CHOP: {
+        '1m': { score: 25, desc: '低波震荡期 1m 杂波极多，假突破率高' },
+        '3m': { score: 35, desc: '低波震荡期 3m 缺乏主线，易被反复洗盘' },
+        '5m': { score: 55, desc: '5m 表现平平，仅适合超短线观望' },
+        '15m': { score: 88, desc: '推荐: 15m 过滤低波杂波，结构相对清晰' },
+        '30m': { score: 95, desc: '最佳推荐: 30m 具备强震荡过滤能力，胜率极高' },
+        '1h': { score: 90, desc: '推荐: 1h 大周期受低波影响较小' },
+        '4h': { score: 82, desc: '4h 稳健性强但交易信号触发较慢' },
+        '1d': { score: 75, desc: '1d 日线级别稳健，适合长线参考' },
+      },
+      NORMAL_TRENDING: {
+        '1m': { score: 40, desc: '1m 交易手续费消耗较大' },
+        '3m': { score: 60, desc: '3m 适合高频短线回调确认' },
+        '5m': { score: 82, desc: '5m 响应迅速，适合捕获趋势启动' },
+        '15m': { score: 96, desc: '黄金推荐: 15m 趋势与胜率最佳平衡点' },
+        '30m': { score: 92, desc: '推荐: 30m 趋势稳定性强，盈亏比极佳' },
+        '1h': { score: 85, desc: '1h 适合中线趋势追踪' },
+        '4h': { score: 78, desc: '4h 趋势方向极度明确' },
+        '1d': { score: 70, desc: '1d 周期较长，适合大方向对齐' },
+      },
+      HIGH_VOLATILITY_BREAKOUT: {
+        '1m': { score: 50, desc: '1m 速度极快，需要极低延迟' },
+        '3m': { score: 78, desc: '3m 快速跟进强动能突破' },
+        '5m': { score: 95, desc: '最佳推荐: 5m 在高波爆发期敏捷捕获第一波突破' },
+        '15m': { score: 93, desc: '黄金推荐: 15m 兼顾爆发力与突破真实度' },
+        '30m': { score: 85, desc: '30m 反应略稍迟缓但非常安全' },
+        '1h': { score: 75, desc: '1h 适合大波幅行情追踪' },
+        '4h': { score: 65, desc: '4h 无法及时响应突发高波行情' },
+        '1d': { score: 50, desc: '1d 滞后性较高' },
+      },
+      EXTREME_VOLATILITY_SPIKE: {
+        '1m': { score: 15, desc: '危险: 剧烈插针期 1m 秒杀止损盘' },
+        '3m': { score: 25, desc: '危险: 3m 易受剧烈扫损插针误伤' },
+        '5m': { score: 45, desc: '5m 存在较高插针扫损风险' },
+        '15m': { score: 75, desc: '15m 适中，需配合防守止损' },
+        '30m': { score: 94, desc: '黄金推荐: 30m 抗插针洗盘，结构完好' },
+        '1h': { score: 92, desc: '推荐: 1h 大结构有效规避插针' },
+        '4h': { score: 88, desc: '4h 安全系数最高，彻底抵御剧烈插针' },
+        '1d': { score: 80, desc: '1d 大周线安全防御' },
+      },
+    };
+
+    const currentRegimeMap = suitabilityMap[currentRegime];
+
+    const items = allTimeframes.map((tf) => {
+      const tradesForTf = this.closedTrades.filter((t) => t.interval === tf);
+      const totalTrades = tradesForTf.length;
+      const wins = tradesForTf.filter((t) => t.netPnl > 0).length;
+      const winRate = totalTrades > 0 ? Number(((wins / totalTrades) * 100).toFixed(1)) : 50.0;
+      const totalNetPnlUsdt = Number(tradesForTf.reduce((acc, t) => acc + t.netPnl, 0).toFixed(2));
+      const avgPnlUsdt = totalTrades > 0 ? Number((totalNetPnlUsdt / totalTrades).toFixed(2)) : 0;
+
+      const suitability = currentRegimeMap[tf] || { score: 60, desc: '通用周期' };
+
+      return {
+        timeframe: tf,
+        rank: 1,
+        totalTrades,
+        wins,
+        winRate,
+        avgPnlUsdt,
+        totalNetPnlUsdt,
+        volatilitySuitabilityScore: suitability.score,
+        isRecommended: false,
+        regimeFitDescription: suitability.desc,
+      };
+    });
+
+    items.sort((a, b) => {
+      const scoreA = a.winRate * 0.5 + a.volatilitySuitabilityScore * 0.5;
+      const scoreB = b.winRate * 0.5 + b.volatilitySuitabilityScore * 0.5;
+      return scoreB - scoreA;
+    });
+
+    items.forEach((item, idx) => {
+      item.rank = idx + 1;
+      if (idx === 0) item.isRecommended = true;
+    });
+
+    const topRec = items[0];
+    const recReason = `当前市场处于【${regimeName.split(' ')[0]}】环境 (波动指数 ${latestAtrRatio}x)。综合历史胜率 (${topRec.winRate}%) 与该波段适配度 (${topRec.volatilitySuitabilityScore}分)，系统诊断【${topRec.timeframe}】为最佳黄金分析周期。`;
+
+    return {
+      currentRegime,
+      regimeName,
+      regimeDescription,
+      volatilityIndexRatio: latestAtrRatio,
+      recommendedTimeframe: topRec.timeframe,
+      recommendationReason: recReason,
+      rankings: items,
+    };
+  }
+
   public getStatus(): BotStatus {
     const hasKeys = this.hasApiCredentials();
     const logsReversed = [...this.logs].reverse();
@@ -785,6 +911,7 @@ class TradingEngine {
       equityHistory: [...this.equityHistory],
       learningGeneration: this.learningGeneration,
       patternLearningStats: Array.from(this.patternLearningWeights.values()),
+      timeframeDiagnostic: this.getTimeframeDiagnosticReport(),
       logs: [...this.logs],
       recentSchedulingEvents,
       systemMetrics: this.getServerSystemMetrics(),

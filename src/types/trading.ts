@@ -163,6 +163,35 @@ export interface PatternSessionStat {
   wins: number;
 }
 
+export type MarketVolatilityRegime =
+  | 'LOW_VOLATILITY_CHOP'
+  | 'NORMAL_TRENDING'
+  | 'HIGH_VOLATILITY_BREAKOUT'
+  | 'EXTREME_VOLATILITY_SPIKE';
+
+export interface TimeframeRankingItem {
+  timeframe: string;
+  rank: number;
+  totalTrades: number;
+  wins: number;
+  winRate: number;
+  avgPnlUsdt: number;
+  totalNetPnlUsdt: number;
+  volatilitySuitabilityScore: number;
+  isRecommended: boolean;
+  regimeFitDescription: string;
+}
+
+export interface TimeframeDiagnosticReport {
+  currentRegime: MarketVolatilityRegime;
+  regimeName: string;
+  regimeDescription: string;
+  volatilityIndexRatio: number;
+  recommendedTimeframe: string;
+  recommendationReason: string;
+  rankings: TimeframeRankingItem[];
+}
+
 export interface PatternLearningItem {
   patternType: string;
   patternName: string;

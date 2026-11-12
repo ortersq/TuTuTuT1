@@ -1,5 +1,6 @@
 import React from 'react';
 import { BotStatus } from '../server/botEngine';
+import { TimeframeDiagnosticModule } from './TimeframeDiagnosticModule';
 import { PatternLearningItem } from '../types/trading';
 import { Brain, Cpu, TrendingUp, ShieldCheck, Zap, Award, BarChart3, AlertCircle, Clock, Calendar } from 'lucide-react';
 
@@ -169,6 +170,9 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
           </div>
         </div>
       </div>
+
+      {/* Timeframe Volatility Diagnostic Module */}
+      <TimeframeDiagnosticModule report={status?.timeframeDiagnostic} />
 
       {/* Pattern Weight Matrix Table */}
       <div className="bg-[#0e131f] border border-slate-800 rounded-xl overflow-hidden shadow-lg">
