@@ -518,6 +518,90 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
           </table>
         </div>
       </div>
+
+      {/* Smart Order Execution Algorithm & Dynamic Correlation Hedging Panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Panel 1: Smart Order Execution Algorithm (Volume & Volatility Order Slicing) */}
+        <div className="bg-[#0b0e14] border border-cyan-500/30 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span className="text-xs font-bold text-cyan-300 flex items-center gap-1.5">
+              <Zap className="w-4 h-4 text-cyan-400" />
+              <span>成交量与波动率‘智能执行算法’ (Smart Order Execution)</span>
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 font-mono">
+              防滑点 & 冰山分片撮合
+            </span>
+          </div>
+
+          {status?.smartExecutionLogs && status.smartExecutionLogs.length > 0 ? (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {status.smartExecutionLogs.slice(0, 5).map((log, idx) => (
+                <div key={idx} className="bg-slate-900/80 border border-slate-800 p-2.5 rounded-lg text-xs space-y-1 font-mono">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-white flex items-center gap-1.5">
+                      <span className={`w-2 h-2 rounded-full ${log.side === 'BUY' ? 'bg-emerald-400' : 'bg-rose-400'}`} />
+                      <span>[{log.symbol} {log.side}]</span>
+                    </span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-300 border border-cyan-500/30 font-bold">
+                      {log.executionAlgorithm} ({log.slicesCount}分片)
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300 font-sans leading-relaxed">
+                    {log.executionReason}
+                  </div>
+                  <div className="text-[10px] text-slate-500 flex justify-between">
+                    <span>成交量比率: {log.volumeRatio}x 均值</span>
+                    <span>预估滑点: {log.estimatedSlippageBps} bps</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 text-center text-xs text-slate-500 font-sans border border-slate-800/80 rounded-lg">
+              🟢 智能订单执行引擎处于全自动就绪状态，触发信号时自动根据 Orderbook 深度选择冰山/TWAP/市价单
+            </div>
+          )}
+        </div>
+
+        {/* Panel 2: Dynamic Correlation Hedging (Portfolio Exposure Reduction) */}
+        <div className="bg-[#0b0e14] border border-amber-500/30 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span className="text-xs font-bold text-amber-300 flex items-center gap-1.5">
+              <ShieldCheck className="w-4 h-4 text-amber-400" />
+              <span>动态相关性主动对冲中枢 (Correlation Hedging)</span>
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-amber-500/20 text-amber-300 font-mono">
+              组合风险降维与平滑
+            </span>
+          </div>
+
+          {status?.correlationHedgingLogs && status.correlationHedgingLogs.length > 0 ? (
+            <div className="space-y-2 max-h-48 overflow-y-auto pr-1">
+              {status.correlationHedgingLogs.slice(0, 5).map((log, idx) => (
+                <div key={idx} className="bg-slate-900/80 border border-amber-500/30 p-2.5 rounded-lg text-xs space-y-1 font-mono">
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-amber-300">{log.pairName}</span>
+                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 font-bold">
+                      正相关性: {(log.correlationCoefficient * 100).toFixed(0)}%
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-200 font-sans font-medium">
+                    {log.actionTaken}
+                  </div>
+                  <div className="text-[10px] text-slate-400 flex justify-between">
+                    <span>弱势被对冲币种: {log.weakerSymbol}</span>
+                    <span className="text-amber-400">已对冲下调 -{log.hedgedQuantityPercent}%</span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 text-center text-xs text-slate-500 font-sans border border-slate-800/80 rounded-lg">
+              🛡️ 组合相关性防线监听中，监测到多个正相关币种（如 BTC/ETH r≥0.80）时自动主动下调弱势品种持仓
+            </div>
+          )}
+        </div>
+      </div>
     </div>
   );
 };

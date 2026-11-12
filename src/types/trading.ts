@@ -295,6 +295,28 @@ export interface SymbolSensitivityRLState {
   lastUpdated: number;
 }
 
+export interface SmartExecutionResult {
+  symbol: string;
+  side: 'BUY' | 'SELL';
+  executionAlgorithm: 'MARKET_DIRECT' | 'ICEBERG_LIMIT_SLICING' | 'TWAP_HEDGING';
+  volumeRatio: number;
+  estimatedSlippageBps: number;
+  slicesCount: number;
+  executionReason: string;
+  timestamp: number;
+}
+
+export interface CorrelationHedgingState {
+  pairName: string;
+  correlationCoefficient: number;
+  symbolA: string;
+  symbolB: string;
+  weakerSymbol: string;
+  actionTaken: string;
+  hedgedQuantityPercent: number;
+  timestamp: number;
+}
+
 export type VolatilityLevel = 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME';
 
 export interface HeatmapSampleTrade {
