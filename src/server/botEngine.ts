@@ -262,6 +262,10 @@ class TradingEngine {
   /** Last candle used to open a position, so one candle can only produce one entry. */
   private lastEntryBarTime: Map<string, { interval: string; barTime: number }> = new Map();
   private lastCooldownLogAt: Map<string, number> = new Map();
+  /** Rate-limit bookkeeping for repetitive informational logs. */
+  private logThrottleAt: Map<string, number> = new Map();
+  /** Last signal state already reported, so one candle logs its signal once. */
+  private lastSignalLogKey: Map<string, string> = new Map();
   /** Last time we attached exchange protection for `symbol:side` (prevents duplicate SL/TP storms). */
   private protectionPlacedAt: Map<string, number> = new Map();
   /**
@@ -3089,6 +3093,8 @@ class TradingEngine {
 
     if (clearLogs) {
       this.logs = [];
+      this.logThrottleAt.clear();
+      this.lastSignalLogKey.clear();
       this.lastSyncErrorLogTime = 0;
       this.lastCircuitBreakerLogTime = 0;
       this.lastDrawdownLockLogTime = 0;
@@ -3164,6 +3170,8 @@ class TradingEngine {
     this.symbolCooldownUntil.clear();
     this.lastEntryBarTime.clear();
     this.lastCooldownLogAt.clear();
+    this.logThrottleAt.clear();
+    this.lastSignalLogKey.clear();
     if (this.params.minPatternQuality > 75) {
       this.params = { ...this.params, minPatternQuality: 75 };
     }
@@ -3296,6 +3304,27 @@ class TradingEngine {
     this.logs.unshift(entry);
     if (this.logs.length > 500) this.logs.pop();
     this.notifyListeners();
+  }
+
+  /**
+   * Log with a per-key rate limit.
+   *
+   * The scanner re-evaluates every symbol/timeframe every 10s, so any "condition still true"
+   * message (signals, filters, caps) would otherwise be repeated ~90 times per 15m candle and
+   * drown the console. One line per key per window is enough to understand what is happening.
+   */
+  private addLogThrottled(
+    key: string,
+    minIntervalMs: number,
+    level: 'info' | 'warn' | 'success' | 'error',
+    category: 'SYSTEM' | 'ORDER' | 'SIGNAL' | 'API',
+    message: string,
+    symbol?: string
+  ): void {
+    const now = Date.now();
+    if (now - (this.logThrottleAt.get(key) ?? 0) < minIntervalMs) return;
+    this.logThrottleAt.set(key, now);
+    this.addLog(level, category, message, symbol);
   }
 
   // ==================================================================================
@@ -3906,12 +3935,23 @@ class TradingEngine {
             this.upsertScanResult(scanObj);
 
             if (latestSig !== 0 && matchedPattern) {
-              this.addLog(
-                'info',
-                'SIGNAL',
-                `⚡ 触发形态信号: [${symbol} ${interval}] ${matchedPattern.name} (代码: ${matchedPattern.type}, 动作: ${matchedPattern.action}, 质量: ${matchedPattern.qualityScore})`,
-                symbol
-              );
+              // One line per (symbol, interval, candle). The scan runs every 10s, so without this
+              // the exact same signal was printed ~90 times per 15m candle — and it kept printing
+              // after the position was already open, which looked like repeated re-entry.
+              const signalState = `${latestBar.timestamp}:${latestSig}:${matchedPattern.type}`;
+              const signalLogKey = `signal:${symbol}:${interval}`;
+              if (this.lastSignalLogKey.get(signalLogKey) !== signalState) {
+                this.lastSignalLogKey.set(signalLogKey, signalState);
+                const alreadyHolding = this.activePositions.some((p) => p.symbol === symbol);
+                this.addLog(
+                  'info',
+                  'SIGNAL',
+                  `⚡ 触发形态信号: [${symbol} ${interval}] ${matchedPattern.name} (代码: ${matchedPattern.type}, 动作: ${matchedPattern.action}, 质量: ${matchedPattern.qualityScore})${
+                    alreadyHolding ? '｜该币已有持仓，不重复开仓' : ''
+                  }`,
+                  symbol
+                );
+              }
             }
 
             const activePosIndex = this.activePositions.findIndex((p) => p.symbol === symbol);
@@ -4274,7 +4314,9 @@ class TradingEngine {
 
               // Portfolio max concurrent positions limit driven by VIX-like regime
               if (this.activePositions.length >= portfolioAlloc.maxConcurrentPositions) {
-                this.addLog(
+                this.addLogThrottled(
+                  `cap:${symbol}`,
+                  120000,
                   'info',
                   'SIGNAL',
                   `⚖️ [动态资产组合上限] VIX=${portfolioAlloc.vixLikeIndex} 限制最大同时持仓 ${portfolioAlloc.maxConcurrentPositions} 笔，暂停新增 ${symbol}`,
@@ -4290,7 +4332,9 @@ class TradingEngine {
                   s.strategyKey === 'pattern_price_action'
               );
               if (matchedScreener?.status === 'ELIMINATED_BELOW_C' && matchedPattern.qualityScore < 95) {
-                this.addLog(
+                this.addLogThrottled(
+                  `screen:${symbol}`,
+                  300000,
                   'warn',
                   'SIGNAL',
                   `📉 [7日策略自动筛选淘汰]: ${matchedScreener.strategyName} 评级 ${matchedScreener.grade} 级 (<C)，已自动淘汰拦截开仓！`,
@@ -4305,7 +4349,9 @@ class TradingEngine {
               // 1. Online Multi-Dimensional Self-Learning Check (Timeframe & Session Slicing)
               if (learningItem) {
                 if (learningItem.status === 'DECAY_PRUNED' && matchedPattern.qualityScore < 94) {
-                  this.addLog(
+                  this.addLogThrottled(
+                    `prune:${symbol}:${interval}`,
+                    300000,
                     'warn',
                     'SIGNAL',
                     `🧠 【自学习强化剪枝拦截】: 拒绝开仓！形态【${matchedPattern.name}】已被强化学习标记为低胜率剪枝 (权重 ${learningItem.weight}x, 胜率 ${learningItem.winRate}%, 信号分: ${matchedPattern.qualityScore})`,
@@ -4317,7 +4363,9 @@ class TradingEngine {
                 // A. Timeframe-Specific Low Win Rate Filter (5m vs 15m vs 30m)
                 const tfStat = learningItem.timeframeStats?.find((t) => t.timeframe === interval);
                 if (tfStat && tfStat.totalTrades >= 3 && tfStat.winRate < 35 && matchedPattern.qualityScore < 92) {
-                  this.addLog(
+                  this.addLogThrottled(
+                    `tffilter:${symbol}:${interval}`,
+                    300000,
                     'warn',
                     'SIGNAL',
                     `⏱️ 【周期离散防护拦截】: 拒绝开仓！形态【${matchedPattern.name}】在【${interval}】周期历史胜率仅 ${tfStat.winRate.toFixed(1)}% (${tfStat.wins}/${tfStat.totalTrades}胜)，降维避让`,
@@ -4335,7 +4383,9 @@ class TradingEngine {
 
                 const sStat = learningItem.sessionStats?.find((s) => s.sessionKey === currentSessionKey);
                 if (sStat && sStat.totalTrades >= 3 && sStat.winRate < 35 && matchedPattern.qualityScore < 92) {
-                  this.addLog(
+                  this.addLogThrottled(
+                    `sessionfilter:${symbol}:${interval}`,
+                    300000,
                     'warn',
                     'SIGNAL',
                     `⏰ 【时段陷阱拦截】: 拒绝开仓！形态【${matchedPattern.name}】在当前【${sStat.sessionName.split(' ')[0]}】历史胜率仅 ${sStat.winRate.toFixed(1)}% (${sStat.wins}/${sStat.totalTrades}胜)，避开低效时段`,
@@ -4363,7 +4413,9 @@ class TradingEngine {
                 const isHighQualityBypass = matchedPattern.qualityScore >= 93;
 
                 if ((patternWinRate < 45 || patternNetPnl < 0) && !isCoolOffUnfrozen && !isHighQualityBypass) {
-                  this.addLog(
+                  this.addLogThrottled(
+                    `patterncool:${symbol}`,
+                    300000,
                     'warn',
                     'SIGNAL',
                     `⚠️ 【形态自优防护拦截】: 拒绝开仓！形态【${matchedPattern.name}】在近期 10 笔调单中胜率为 ${patternWinRate.toFixed(1)}% (${patternWins}/${totalCompleted}胜)，冷却观察中 (${hoursSinceLastTrade.toFixed(1)}h/12h)。`,
@@ -4371,7 +4423,9 @@ class TradingEngine {
                   );
                   continue;
                 } else if (isCoolOffUnfrozen && patternWinRate < 45) {
-                  this.addLog(
+                  this.addLogThrottled(
+                    `thaw:${symbol}`,
+                    300000,
                     'info',
                     'SIGNAL',
                     `🔄 【形态解冻复核】: 形态【${matchedPattern.name}】已过 12h 冷却期，随着大盘趋势转变重新解冻试仓！`,
@@ -4386,7 +4440,9 @@ class TradingEngine {
               const requiredQualityThreshold = symRl ? symRl.qualityScoreThreshold : 85;
 
               if (matchedPattern.qualityScore < requiredQualityThreshold) {
-                this.addLog(
+                this.addLogThrottled(
+                  `rl:${symbol}`,
+                  300000,
                   'warn',
                   'SIGNAL',
                   `🧠 【强化学习灵敏度门槛拦截】: 拒绝开仓！币种【${symbol}】当前强化学习迭代门槛为 ≥${requiredQualityThreshold} 分 (${symRl?.rlAction})，当前信号分 ${matchedPattern.qualityScore} 分未达标`,
@@ -4398,7 +4454,9 @@ class TradingEngine {
               // 4. Global Market Correlation Circuit Breaker Enforcement
               const mktCorr = this.computeMarketCorrelationMetrics();
               if (mktCorr.isCircuitBreakerActive && this.activePositions.length >= mktCorr.maxAllowedAccountPositions) {
-                this.addLog(
+                this.addLogThrottled(
+                  `circuitlock:${symbol}`,
+                  120000,
                   'warn',
                   'SIGNAL',
                   `🚨 【全局市场共振熔断锁定】: 拒绝开仓！市场检测到全网共振暴发，全局熔断限制最大持仓 ≤ ${mktCorr.maxAllowedAccountPositions} 笔！`,
@@ -4412,7 +4470,9 @@ class TradingEngine {
               const activeCountForSym = this.activePositions.filter((p) => p.symbol === symbol).length;
 
               if (symRiskCtrl && activeCountForSym >= symRiskCtrl.maxAllowedPositions) {
-                this.addLog(
+                this.addLogThrottled(
+                  `symcap:${symbol}`,
+                  120000,
                   'warn',
                   'SIGNAL',
                   `🛡️ 【Symbol 风控上限限制】: 拒绝开仓！币种【${symbol}】已触及风控最大持仓上限 (${activeCountForSym}/${symRiskCtrl.maxAllowedPositions})`,
@@ -4432,7 +4492,9 @@ class TradingEngine {
               let leverage = Math.max(1, Math.min(20, baseLeverage));
               if (mktCorr.isCircuitBreakerActive) {
                 leverage = Math.min(leverage, mktCorr.safeLevelLeverage);
-                this.addLog(
+                this.addLogThrottled(
+                  `circuitlev:${symbol}`,
+                  120000,
                   'warn',
                   'SIGNAL',
                   `🚨 【市场熔断避险降杠杆】: 全局大盘共振剧烈，强制将开仓杠杆归一化为 ${leverage}x 最低安全基线！`,
@@ -4441,7 +4503,14 @@ class TradingEngine {
               } else if (volRatio > 1.8) {
                 // High Volatility Spike -> Lower leverage to widen stop-loss buffer & prevent wick liquidation
                 leverage = Math.max(1, Math.round(leverage * 0.65));
-                this.addLog('info', 'SIGNAL', `🛡️ [${symbol} 风险平价降杠杆] 当前波动率比率 ${volRatio.toFixed(2)}x (剧烈波动插针期)，杠杆调至 ${leverage}x 防扫损！`, symbol);
+                this.addLogThrottled(
+                  `vollev:${symbol}`,
+                  300_000,
+                  'info',
+                  'SIGNAL',
+                  `🛡️ [${symbol} 风险平价降杠杆] 当前波动率比率 ${volRatio.toFixed(2)}x (剧烈波动插针期)，杠杆调至 ${leverage}x 防扫损！`,
+                  symbol
+                );
               } else if (matchedPattern.qualityScore < 85) {
                 leverage = Math.max(1, Math.round(leverage * 0.8));
               }
@@ -4450,12 +4519,14 @@ class TradingEngine {
               if (symRiskCtrl && symRiskCtrl.riskLevel !== 'SAFE_NORMAL') {
                 const prevLev = leverage;
                 leverage = Math.min(leverage, symRiskCtrl.effectiveLeverage);
-                this.addLog(
-                  'warn',
-                  'SIGNAL',
-                  `🛡️ 【Symbol 动态风控生效】: 币种【${symbol}】处于 ${symRiskCtrl.riskLevel} 状态 (夏普: ${symRiskCtrl.sharpeRatio}, 回撤: ${symRiskCtrl.maxDrawdownPercent}%)，强制将杠杆由 ${prevLev}x 下调至 ${leverage}x`,
-                  symbol
-                );
+                  this.addLogThrottled(
+                    `symrisk:${symbol}`,
+                    300_000,
+                    'warn',
+                    'SIGNAL',
+                    `🛡️ 【Symbol 动态风控生效】: 币种【${symbol}】处于 ${symRiskCtrl.riskLevel} 状态 (夏普: ${symRiskCtrl.sharpeRatio}, 回撤: ${symRiskCtrl.maxDrawdownPercent}%)，强制将杠杆由 ${prevLev}x 下调至 ${leverage}x`,
+                    symbol
+                  );
               }
               leverage = Math.min(baseLeverage, Math.max(1, leverage));
 
@@ -4511,7 +4582,9 @@ class TradingEngine {
               });
 
               if (!sizingResult.canOpen) {
-                this.addLog(
+                this.addLogThrottled(
+                  `sizing:${symbol}`,
+                  120000,
                   'warn',
                   'ORDER',
                   `⏭️ [${symbol} 资金/仓位风控拦截] ${sizingResult.reason}`,
@@ -4940,7 +5013,9 @@ class TradingEngine {
                 actionableArb.weakSymbol
               );
             } else {
-              this.addLog(
+              this.addLogThrottled(
+                `arbmon:${actionableArb.id}`,
+                120000,
                 'info',
                 'SIGNAL',
                 `🔀 [跨品种统计套利监测] ${actionableArb.pairName} | ${actionableArb.reason} (双腿资金校验: ${weakSize.canOpen ? 'OK' : weakSize.reason})`,

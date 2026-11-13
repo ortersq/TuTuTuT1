@@ -117,6 +117,16 @@ test('stop-loss / take-profit alert toggle is persisted in the public status', (
   botEngine.setNotificationConfig({ telegramBotToken: '', telegramChatId: '' });
 });
 
+test('repetitive scan logs are throttled to one line per window', () => {
+  const before = botEngine.getStatus().logs.length;
+  const logThrottled = (botEngine as any).addLogThrottled.bind(botEngine);
+  for (let i = 0; i < 6; i++) {
+    logThrottled('unit:dup', 60_000, 'info', 'SIGNAL', '⚡ 触发形态信号: [TESTUSDT 15m] 重复消息');
+  }
+  const after = botEngine.getStatus().logs.length;
+  assert.equal(after - before, 1, 'six identical scans must produce exactly one log line');
+});
+
 test('protection-change message shows original → new level, and marks a fresh attach', () => {
   const format = (botEngine as any).formatProtectionChange.bind(botEngine);
   const pos = {
