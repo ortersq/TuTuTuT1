@@ -582,5 +582,13 @@ export interface LiveAccountRiskMetrics {
   dataSource: 'BINANCE_LIVE_API' | 'PAPER_SIMULATION';
 }
 
+export interface MarketTickerSnapshot {
+  symbol: string;
+  price: number;
+  change24hPercent: number;
+  updatedAt: number;
+  source?: string;
+}
+
 
 

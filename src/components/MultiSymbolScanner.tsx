@@ -19,9 +19,12 @@ import { LivePerformanceMonitor } from './LivePerformanceMonitor';
 import { PortfolioBasketPanel } from './PortfolioBasketPanel';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { Kline } from '../types/trading';
+import { RealtimeWsDiagnostics } from '../hooks/useRealtimeWebSocket';
 
 interface MultiSymbolScannerProps {
   status: BotStatus | null;
+  wsDiagnostics?: RealtimeWsDiagnostics;
+  onReconnectWs?: () => void;
   onRefreshStatus: () => void;
   onSyncLive?: () => Promise<void> | void;
   onClosePosition: (symbol: string) => void;
@@ -30,6 +33,8 @@ interface MultiSymbolScannerProps {
 
 export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
   status,
+  wsDiagnostics,
+  onReconnectWs,
   onSyncLive,
   onClosePosition,
   onCloseAllPositions,
@@ -79,6 +84,39 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
                 </span>
               )}
             </div>
+            {wsDiagnostics && (
+              <div className="text-[10px] text-slate-400 font-mono mt-1 flex items-center gap-2">
+                <span>
+                  WS实时流:{' '}
+                  <strong
+                    className={
+                      wsDiagnostics.binanceWsPhase === 'CONNECTED' &&
+                      wsDiagnostics.serverWsPhase === 'CONNECTED'
+                        ? 'text-emerald-400'
+                        : wsDiagnostics.serverWsPhase === 'CONNECTED' ||
+                          wsDiagnostics.binanceWsPhase === 'CONNECTED'
+                        ? 'text-sky-400'
+                        : 'text-amber-400'
+                    }
+                  >
+                    {wsDiagnostics.binanceWsPhase === 'CONNECTED'
+                      ? '币安直连推送中'
+                      : wsDiagnostics.serverWsPhase === 'CONNECTED'
+                      ? '服务端WS推送中'
+                      : '重连同步中...'}
+                  </strong>
+                </span>
+                {onReconnectWs && (
+                  <button
+                    type="button"
+                    onClick={onReconnectWs}
+                    className="text-amber-400 hover:text-amber-300 underline cursor-pointer"
+                  >
+                    重连
+                  </button>
+                )}
+              </div>
+            )}
           </div>
         </div>
 
@@ -328,11 +366,21 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
         {symbols.map((symbol) => {
           const scanForSymbol = status?.scanResults.filter((s) => s.symbol === symbol) || [];
           const activePosForSymbol = status?.activePositions.find((p) => p.symbol === symbol);
+          const ticker = status?.marketTickers?.[symbol];
           const sampleScan = scanForSymbol.find((s) => s.interval === '15m') || scanForSymbol[0];
-          const samplePrice = sampleScan?.currentPrice || 0;
-          const sample24h = sampleScan?.change24hPercent || 0;
+          const samplePrice =
+            ticker?.price || sampleScan?.currentPrice || activePosForSymbol?.currentPrice || 0;
+          const sample24h = ticker?.change24hPercent ?? sampleScan?.change24hPercent ?? 0;
+          const isUnavailable = status?.symbolExchangeRules?.[symbol]?.available === false;
+          const hasCompletedInitialScan = (status?.lastMarketPreviewTime ?? 0) > 0;
           const trendContext = sampleScan?.trendContext || 'RANGE_BOUND';
-          const trendDesc = sampleScan?.trendDescription || '🟡 箱体震荡整理';
+          const trendDesc =
+            sampleScan?.trendDescription ||
+            (isUnavailable
+              ? '⚪ 交易所暂未开放该合约行情'
+              : hasCompletedInitialScan && samplePrice === 0
+              ? '🟡 暂未获取到该合约行情 (受限或未开放)'
+              : '🟡 箱体震荡整理');
 
           return (
             <div
@@ -352,7 +400,7 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
                   <div>
                     <div className="text-base font-bold text-slate-100 flex items-center gap-2">
                       <span>{symbol}</span>
-                      {status?.symbolExchangeRules?.[symbol]?.available === false && (
+                      {isUnavailable && (
                         <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
                           币安USDT合约暂未上市
                         </span>
@@ -378,7 +426,16 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
 
                 <div className="text-right">
                   <div className="text-base font-bold font-mono text-slate-100">
-                    ${samplePrice > 0 ? samplePrice.toLocaleString('en-US') : '加载中...'}
+                    {samplePrice > 0
+                      ? `$${samplePrice.toLocaleString('en-US', {
+                          minimumFractionDigits: samplePrice < 10 ? 2 : 1,
+                          maximumFractionDigits: samplePrice < 10 ? 4 : 2,
+                        })}`
+                      : isUnavailable
+                      ? '暂无报价'
+                      : hasCompletedInitialScan
+                      ? '暂未获取到报价'
+                      : '⏳ 获取报价中...'}
                   </div>
                   <div
                     className={`text-xs font-semibold font-mono ${

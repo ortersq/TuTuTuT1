@@ -24,6 +24,7 @@ import {
   LiveAccountRiskMetrics,
   LiveAccountSyncInfo,
   MarketCorrelationMetrics,
+  MarketTickerSnapshot,
   PatternLearningItem,
   PortfolioAllocationState,
   PortfolioBasketState,
@@ -40,6 +41,7 @@ import {
 } from '../types/trading';
 import {
   DEFAULT_SYMBOL_EXCHANGE_RULES,
+  fetchBinanceFuturesTickers,
   fetchBinanceKlines,
   fetchFuturesExchangeRules,
 } from '../utils/binanceApi';
@@ -192,6 +194,7 @@ export interface BotStatus {
   activePositions: ActivePosition[];
   closedTrades: BotTradeRecord[];
   scanResults: SymbolScanResult[];
+  marketTickers: Record<string, MarketTickerSnapshot>;
   patternStats: PatternStatItem[];
   equityHistory: LiveEquityPoint[];
   learningGeneration: number;
@@ -212,6 +215,7 @@ export interface BotStatus {
   recentSchedulingEvents: LogEntry[];
   systemMetrics: ServerSystemMetrics;
   lastUpdateTime: number;
+  lastMarketPreviewTime: number;
   riskConfig: RiskManagementConfig;
 }
 
@@ -245,9 +249,13 @@ class TradingEngine {
   private arbitrageOpportunities: ArbitrageOpportunity[] = [];
   private lastArbitrageExecTime: Map<string, number> = new Map();
   private liveSyncTimer: NodeJS.Timeout | null = null;
+  private marketPreviewTimer: NodeJS.Timeout | null = null;
+  private isRefreshingMarket: boolean = false;
+  private lastMarketPreviewTime: number = 0;
   private syncInFlight: Promise<LiveAccountSyncInfo | null> | null = null;
   private lastLiveSamplePushTime: number = 0;
   private latestSymbolKlinesMap: Map<string, Kline[]> = new Map();
+  private marketTickers: Map<string, MarketTickerSnapshot> = new Map();
   private basketPeakNetPnl: number = 0;
   private basketCloseCooldownUntil: number | null = null;
   private lastBasketCooldownLogTime: number = 0;
@@ -264,6 +272,8 @@ class TradingEngine {
   private logs: LogEntry[] = [];
   private lastUpdateTime: number = Date.now();
   private cycleCounter: number = 0;
+  private statusListeners: Set<(status: BotStatus) => void> = new Set();
+  private notifyTimer: NodeJS.Timeout | null = null;
 
   private riskConfig: RiskManagementConfig = {
     slMode: 'ATR',
@@ -330,9 +340,177 @@ class TradingEngine {
           : '🔵 模拟观察模式 (无 API Key，只自动模拟开平仓并记录损益)'
       }`
     );
-    if (hasKeys) {
-      this.ensureLiveSyncLoop();
-      this.syncLiveAccountNow(true).catch(() => {});
+    const isTestRunner =
+      Boolean(process.env.NODE_TEST_CONTEXT) ||
+      process.argv.some((arg) => arg === '--test' || arg.endsWith('.test.ts'));
+    if (!isTestRunner) {
+      if (hasKeys) {
+        this.ensureLiveSyncLoop();
+        this.syncLiveAccountNow(true).catch(() => {});
+      }
+      this.ensureMarketPreviewLoop();
+      this.refreshMarketPreview().catch(() => {});
+    }
+  }
+
+  private ensureMarketPreviewLoop(): void {
+    if (this.marketPreviewTimer) return;
+    // Keep live prices & read-only pattern scans fresh every 10s even while auto-trading is paused
+    this.marketPreviewTimer = setInterval(() => {
+      if (!this.isRunning && !this.isProcessing) {
+        this.refreshMarketPreview().catch(() => {});
+      }
+    }, 10_000);
+    this.marketPreviewTimer.unref?.();
+  }
+
+  private upsertScanResult(item: SymbolScanResult): void {
+    const idx = this.scanResults.findIndex(
+      (s) => s.symbol === item.symbol && s.interval === item.interval
+    );
+    if (idx >= 0) {
+      this.scanResults[idx] = item;
+    } else {
+      this.scanResults.push(item);
+    }
+    if (item.interval === '15m' || !this.marketTickers.has(item.symbol)) {
+      const existingTicker = this.marketTickers.get(item.symbol);
+      // Preserve authoritative 24h ticker change from /ticker/24hr if available, otherwise use scan bar change
+      this.marketTickers.set(item.symbol, {
+        symbol: item.symbol,
+        price: item.currentPrice,
+        change24hPercent: existingTicker?.source?.includes('24HR')
+          ? existingTicker.change24hPercent
+          : item.change24hPercent,
+        updatedAt: item.lastScanTime,
+        source: existingTicker?.source || 'BINANCE_KLINES',
+      });
+    }
+    this.notifyListeners();
+  }
+
+  private async refreshTickersSnapshot(): Promise<void> {
+    try {
+      const tickers = await fetchBinanceFuturesTickers(
+        this.monitoredSymbols,
+        this.getFuturesBaseUrl()
+      );
+      const now = Date.now();
+      for (const [sym, q] of tickers.entries()) {
+        this.marketTickers.set(sym, {
+          symbol: sym,
+          price: q.price,
+          change24hPercent: q.change24hPercent,
+          updatedAt: now,
+          source: q.source,
+        });
+      }
+    } catch {
+      // ignore transient ticker error
+    }
+  }
+
+  /**
+   * Read-only market quote + 5m/15m/30m pattern scan so homepage never gets stuck on "加载中..."
+   * even when auto-trading is paused. Never opens or closes orders.
+   */
+  public async refreshMarketPreview(): Promise<void> {
+    if (this.isRefreshingMarket || this.isProcessing) return;
+    this.isRefreshingMarket = true;
+    try {
+      await Promise.allSettled([
+        this.refreshExchangeRulesIfNeeded(false),
+        this.refreshTickersSnapshot(),
+      ]);
+
+      await Promise.allSettled(
+        this.monitoredSymbols.map(async (symbol) => {
+          for (const interval of this.monitoredTimeframes) {
+            try {
+              const fetchResult = await fetchBinanceKlines({
+                symbol,
+                interval,
+                limit: 120,
+              });
+              const klines = fetchResult.klines;
+              if (klines.length < 30) continue;
+
+              if (interval === '15m' || !this.latestSymbolKlinesMap.has(symbol)) {
+                this.latestSymbolKlinesMap.set(symbol, klines);
+              }
+
+              const latestBar = klines[klines.length - 1];
+              const currentPrice = latestBar.close;
+              const firstBarPrice = klines[0].open;
+              const change24hPercent =
+                firstBarPrice > 0 ? ((currentPrice - firstBarPrice) / firstBarPrice) * 100 : 0;
+              const currentAtr =
+                calculateATR(klines, 14)[klines.length - 1] ?? (latestBar.high - latestBar.low);
+
+              const recentSlice = klines.slice(-60);
+              const baselinePct =
+                recentSlice.reduce((s, k) => s + (k.high - k.low) / Math.max(1e-8, k.close), 0) /
+                Math.max(1, recentSlice.length);
+              if (interval === '15m' || !this.symbolAtrPctBaseline.has(symbol)) {
+                this.symbolAtrPctBaseline.set(symbol, baselinePct);
+              }
+
+              const closes = klines.map((k) => k.close);
+              const ema20Arr = calculateEMA(closes, 20);
+              const ema50Arr = calculateEMA(closes, 50);
+              const e20 = ema20Arr[ema20Arr.length - 1];
+              const e50 = ema50Arr[ema50Arr.length - 1];
+
+              let trendContext: 'BULL_TREND' | 'BEAR_TREND' | 'RANGE_BOUND' = 'RANGE_BOUND';
+              let trendDescription = '🟡 箱体震荡整理 (EMA20/50 交叉粘合)';
+              if (e20 !== null && e50 !== null) {
+                if (e20 > e50 * 1.001) {
+                  trendContext = 'BULL_TREND';
+                  trendDescription = '🟢 多头主升趋势 (EMA20 > EMA50 向上多头发散)';
+                } else if (e20 < e50 * 0.999) {
+                  trendContext = 'BEAR_TREND';
+                  trendDescription = '🔴 空头主跌趋势 (EMA20 < EMA50 向下空头发散)';
+                }
+              }
+
+              const { signals, patternMap } = generateAllSignals(
+                klines,
+                this.params,
+                'pattern_price_action'
+              );
+              const latestIndex = signals.length - 1;
+              const latestSig = signals[latestIndex];
+              const matchedPattern = patternMap.get(latestIndex);
+
+              this.upsertScanResult({
+                symbol,
+                interval,
+                currentPrice,
+                change24hPercent: Number(change24hPercent.toFixed(2)),
+                atr: currentAtr,
+                trendContext,
+                trendDescription,
+                signal: latestSig,
+                patternType: matchedPattern?.type,
+                patternName: matchedPattern?.name,
+                patternCategory: matchedPattern?.category,
+                qualityScore: matchedPattern?.qualityScore,
+                stopLossPrice: matchedPattern?.stopLossPrice,
+                targetPrice: matchedPattern?.targetPrice,
+                lastScanTime: Date.now(),
+              });
+            } catch {
+              // skip single symbol/timeframe failure without blocking other cards
+            }
+          }
+        })
+      );
+      const now = Date.now();
+      this.lastUpdateTime = now;
+      this.lastMarketPreviewTime = now;
+    } finally {
+      this.isRefreshingMarket = false;
+      this.notifyListeners();
     }
   }
 
@@ -346,6 +524,7 @@ class TradingEngine {
         this.stopLiveSyncLoop();
       }
     }, 5000);
+    this.liveSyncTimer.unref?.();
   }
 
   private stopLiveSyncLoop(): void {
@@ -576,8 +755,11 @@ class TradingEngine {
         '✓ 币安 API Key 保存成功，已清理模拟盘历史数据并切换至 🟢 实盘模式，正在实时拉取交易所净值与持仓...'
       );
       this.ensureLiveSyncLoop();
-      await this.refreshExchangeRulesIfNeeded(true);
-      await this.syncLiveAccountNow(true);
+      await Promise.allSettled([
+        this.refreshExchangeRulesIfNeeded(true),
+        this.syncLiveAccountNow(true),
+        this.refreshMarketPreview(),
+      ]);
     } else {
       this.stopLiveSyncLoop();
       this.activePositions = [];
@@ -1065,6 +1247,7 @@ class TradingEngine {
         this.addLog('error', 'API', `❌ 同步币安合约实盘数据异常: ${err.message}`);
       }
     }
+    this.notifyListeners();
   }
 
   private async setBinanceLeverage(symbol: string, leverage: number): Promise<void> {
@@ -1934,6 +2117,7 @@ class TradingEngine {
       activePositions: this.activePositions,
       closedTrades: this.closedTrades.slice(-50),
       scanResults: this.scanResults,
+      marketTickers: Object.fromEntries(this.marketTickers.entries()),
       patternStats: this.computePatternStats(),
       equityHistory: [...this.equityHistory],
       learningGeneration: this.learningGeneration,
@@ -1954,6 +2138,7 @@ class TradingEngine {
       recentSchedulingEvents,
       systemMetrics: this.getServerSystemMetrics(),
       lastUpdateTime: this.lastUpdateTime,
+      lastMarketPreviewTime: this.lastMarketPreviewTime,
       riskConfig: this.riskConfig,
     };
   }
@@ -2060,6 +2245,91 @@ class TradingEngine {
       'SYSTEM',
       `监控配置已更新 | 锁定合约: ${this.monitoredSymbols.join(', ')} | 周期: ${this.monitoredTimeframes.join(', ')} | 杠杆上限: ${this.leverage}x`
     );
+    this.notifyListeners(true);
+  }
+
+  public subscribe(listener: (status: BotStatus) => void): () => void {
+    this.statusListeners.add(listener);
+    return () => {
+      this.statusListeners.delete(listener);
+    };
+  }
+
+  private notifyListeners(immediate: boolean = false): void {
+    if (this.statusListeners.size === 0) return;
+    if (immediate) {
+      if (this.notifyTimer) {
+        clearTimeout(this.notifyTimer);
+        this.notifyTimer = null;
+      }
+      const snapshot = this.getStatus();
+      for (const cb of this.statusListeners) {
+        try {
+          cb(snapshot);
+        } catch {
+          // ignore closed socket error
+        }
+      }
+      return;
+    }
+    if (this.notifyTimer) return;
+    this.notifyTimer = setTimeout(() => {
+      this.notifyTimer = null;
+      if (this.statusListeners.size === 0) return;
+      const snapshot = this.getStatus();
+      for (const cb of this.statusListeners) {
+        try {
+          cb(snapshot);
+        } catch {
+          // ignore
+        }
+      }
+    }, 150);
+    this.notifyTimer.unref?.();
+  }
+
+  public resetDrawdownLock(): void {
+    const baseline = this.equity > 0 ? this.equity : this.balance;
+    this.peakEquity = baseline;
+    this.lastDrawdownLockLogTime = 0;
+    this.addLog(
+      'success',
+      'SYSTEM',
+      `🔧 [异常溯源一键修复] 已将回撤峰值基准线校准至当前净值 $${baseline.toFixed(2)}，解除回撤熔断锁仓限制。`
+    );
+    this.notifyListeners(true);
+  }
+
+  public clearCooldowns(): void {
+    this.basketCloseCooldownUntil = null;
+    this.pendingOrderSymbols.clear();
+    if (this.params.minPatternQuality > 75) {
+      this.params = { ...this.params, minPatternQuality: 75 };
+    }
+    this.addLog(
+      'success',
+      'SYSTEM',
+      `🔧 [异常溯源一键修复] 已清除全平冷却期与挂单占位锁，信号质量标准门限已校准为 ${this.params.minPatternQuality} 分。`
+    );
+    this.notifyListeners(true);
+  }
+
+  public optimizeSmallCapitalConfig(): void {
+    const safeLev = Math.max(1, Math.min(5, this.leverage));
+    this.leverage = safeLev;
+    this.riskConfig = {
+      ...this.riskConfig,
+      sizingMode: 'EQUITY_PERCENT',
+      positionSizePercent: 25,
+      riskPerTradePercent: Math.min(2.0, this.riskConfig.riskPerTradePercent || 2.0),
+      leverage: safeLev,
+    };
+    this.addLog(
+      'success',
+      'SYSTEM',
+      `🔧 [异常溯源一键修复] 已激活小资金动态自适应配比 (单笔风险 ≤ ${this.riskConfig.riskPerTradePercent}%, 保证金占比 25%, 杠杆上限 ${safeLev}x)。`
+    );
+    this.notifyListeners(true);
   }
 
   public async emergencyClosePosition(reason: ExitReason = 'END_OF_DATA', symbol?: string) {
@@ -2147,6 +2417,7 @@ class TradingEngine {
     };
     this.logs.unshift(entry);
     if (this.logs.length > 500) this.logs.pop();
+    this.notifyListeners();
   }
 
   public async sendEmergencyNotification(title: string, message: string): Promise<boolean> {
@@ -2221,10 +2492,11 @@ class TradingEngine {
       const hasKeys = this.hasApiCredentials();
       this.mode = hasKeys ? 'LIVE' : 'PAPER';
 
-      await this.refreshExchangeRulesIfNeeded(false);
-      if (hasKeys) {
-        await this.syncBinanceAccountAndPositions(false);
-      }
+      await Promise.allSettled([
+        this.refreshExchangeRulesIfNeeded(false),
+        this.refreshTickersSnapshot(),
+        ...(hasKeys ? [this.syncBinanceAccountAndPositions(false)] : []),
+      ]);
 
       // ZERO-TOUCH AUTO-EVOLUTION: Automatically absorb AI Diagnostic Recommended Timeframe into scanning pool!
       const diagnostic = this.getTimeframeDiagnosticReport();
@@ -2331,7 +2603,7 @@ class TradingEngine {
             const latestSig = signals[latestIndex];
             const matchedPattern = patternMap.get(latestIndex);
 
-            updatedScans.push({
+            const scanObj: SymbolScanResult = {
               symbol,
               interval,
               currentPrice,
@@ -2347,7 +2619,9 @@ class TradingEngine {
               stopLossPrice: matchedPattern?.stopLossPrice,
               targetPrice: matchedPattern?.targetPrice,
               lastScanTime: Date.now(),
-            });
+            };
+            updatedScans.push(scanObj);
+            this.upsertScanResult(scanObj);
 
             if (latestSig !== 0 && matchedPattern) {
               this.addLog(
@@ -3364,7 +3638,9 @@ class TradingEngine {
     } catch (err: any) {
       this.addLog('error', 'SYSTEM', `监控循环处理异常: ${err.message || '网络连接中断'}`);
     } finally {
+      this.lastMarketPreviewTime = Date.now();
       this.isProcessing = false;
+      this.notifyListeners();
     }
   }
 

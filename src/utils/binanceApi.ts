@@ -79,6 +79,130 @@ export async function fetchFuturesExchangeRules(
   return map;
 }
 
+export interface TickerQuote {
+  symbol: string;
+  price: number;
+  change24hPercent: number;
+  source: string;
+}
+
+/**
+ * Fast single-call bulk 24hr ticker fetch for Binance Futures (and Spot fallback for crypto if geo-blocked).
+ * Populates live prices immediately even before multi-timeframe kline scans finish.
+ */
+export async function fetchBinanceFuturesTickers(
+  symbols: string[],
+  baseUrl: string = 'https://fapi.binance.com'
+): Promise<Map<string, TickerQuote>> {
+  const result = new Map<string, TickerQuote>();
+  const wanted = new Set(symbols.map((s) => s.toUpperCase()));
+  if (wanted.size === 0) return result;
+
+  // 1. Primary: Binance USDT-M Futures bulk 24hr ticker (supports Crypto + TradFi perps like XAU/NVDA/CL)
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4500);
+    const resp = await fetch(`${baseUrl}/fapi/v1/ticker/24hr`, {
+      signal: controller.signal,
+      headers: { Accept: 'application/json' },
+    });
+    clearTimeout(timeoutId);
+    if (resp.ok) {
+      const data = await resp.json();
+      if (Array.isArray(data)) {
+        for (const item of data) {
+          const sym = String(item?.symbol || '').toUpperCase();
+          if (!wanted.has(sym)) continue;
+          const price = parseFloat(item?.lastPrice ?? '0');
+          const change24hPercent = parseFloat(item?.priceChangePercent ?? '0');
+          if (Number.isFinite(price) && price > 0) {
+            result.set(sym, {
+              symbol: sym,
+              price,
+              change24hPercent: Number.isFinite(change24hPercent) ? Number(change24hPercent.toFixed(2)) : 0,
+              source: 'BINANCE_FAPI_24HR',
+            });
+          }
+        }
+      }
+    }
+  } catch {
+    // try fallback below
+  }
+
+  // 2. Fallback for any remaining symbols (e.g., if fapi is geo-blocked in dev preview)
+  const missing = Array.from(wanted).filter((s) => !result.has(s));
+  if (missing.length > 0) {
+    try {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 4500);
+      const encoded = encodeURIComponent(JSON.stringify(missing));
+      const resp = await fetch(`https://data-api.binance.vision/api/v3/ticker/24hr?symbols=${encoded}`, {
+        signal: controller.signal,
+        headers: { Accept: 'application/json' },
+      });
+      clearTimeout(timeoutId);
+      if (resp.ok) {
+        const data = await resp.json();
+        if (Array.isArray(data)) {
+          for (const item of data) {
+            const sym = String(item?.symbol || '').toUpperCase();
+            const price = parseFloat(item?.lastPrice ?? '0');
+            const change24hPercent = parseFloat(item?.priceChangePercent ?? '0');
+            if (Number.isFinite(price) && price > 0) {
+              result.set(sym, {
+                symbol: sym,
+                price,
+                change24hPercent: Number.isFinite(change24hPercent) ? Number(change24hPercent.toFixed(2)) : 0,
+                source: 'BINANCE_VISION_24HR',
+              });
+            }
+          }
+        }
+      }
+    } catch {
+      // ignore if batch contains non-spot symbol on vision endpoint
+    }
+  }
+
+  // 3. Individual vision fallback for BTC/ETH etc. if batch query rejected any symbol
+  const stillMissing = Array.from(wanted).filter((s) => !result.has(s));
+  if (stillMissing.length > 0) {
+    await Promise.allSettled(
+      stillMissing.map(async (sym) => {
+        try {
+          const controller = new AbortController();
+          const timeoutId = setTimeout(() => controller.abort(), 3500);
+          const resp = await fetch(
+            `https://data-api.binance.vision/api/v3/ticker/24hr?symbol=${sym}`,
+            { signal: controller.signal, headers: { Accept: 'application/json' } }
+          );
+          clearTimeout(timeoutId);
+          if (resp.ok) {
+            const item: any = await resp.json();
+            const price = parseFloat(item?.lastPrice ?? '0');
+            const change24hPercent = parseFloat(item?.priceChangePercent ?? '0');
+            if (Number.isFinite(price) && price > 0) {
+              result.set(sym, {
+                symbol: sym,
+                price,
+                change24hPercent: Number.isFinite(change24hPercent)
+                  ? Number(change24hPercent.toFixed(2))
+                  : 0,
+                source: 'BINANCE_VISION_24HR',
+              });
+            }
+          }
+        } catch {
+          // ignore
+        }
+      })
+    );
+  }
+
+  return result;
+}
+
 /**
  * Fetch 100% real historical K-lines directly from Binance official API.
  * NO fake or synthetic fallback data.
@@ -94,7 +218,7 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
     try {
       const url = `${endpoint}?symbol=${cleanSymbol}&interval=${interval}&limit=${Math.min(1000, limit)}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 5000);
+      const timeoutId = setTimeout(() => controller.abort(), 3500);
 
       const resp = await fetch(url, {
         signal: controller.signal,
@@ -106,13 +230,20 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
 
       if (!resp.ok) {
         let errDetail = '';
+        let errCode: number | undefined;
         try {
           const errJson = await resp.json();
+          errCode = errJson?.code;
           if (errJson?.msg) errDetail = ` (${errJson.msg})`;
         } catch {
           // ignore
         }
-        throw new Error(`币安接口 HTTP ${resp.status}${errDetail}`);
+        const err = new Error(`币安接口 HTTP ${resp.status}${errDetail}`);
+        // If Futures endpoint explicitly returns -1121 (Invalid symbol) for a non-spot TradFi ticker, fail fast
+        if (endpoint.includes('fapi.binance.com') && errCode === -1121 && !['BTCUSDT', 'ETHUSDT'].includes(cleanSymbol)) {
+          throw Object.assign(err, { fatalInvalidSymbol: true });
+        }
+        throw err;
       }
 
       const rawData = await resp.json();
@@ -172,6 +303,7 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
       return { klines, audit };
     } catch (err: any) {
       lastError = err;
+      if (err?.fatalInvalidSymbol) break;
       // Try next official endpoint in cascade
       continue;
     }

@@ -1,7 +1,9 @@
 import express from 'express';
+import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import { WebSocketServer, WebSocket } from 'ws';
 import { botEngine } from './src/server/botEngine';
 import { fetchBinanceKlines } from './src/utils/binanceApi';
 import { LOCKED_TARGET_SYMBOLS, normalizeLockedSymbol } from './src/utils/riskAndExecution';
@@ -229,6 +231,37 @@ app.post('/api/bot/close-all', requireAuth, async (req, res) => {
   });
 });
 
+// Protected Root-Cause Anomaly One-Click Fix Route
+app.post('/api/bot/fix-anomaly', requireAuth, async (req, res) => {
+  const { action } = req.body || {};
+  let message = '已执行异常修复操作';
+
+  if (action === 'RESET_DRAWDOWN_LOCK') {
+    botEngine.resetDrawdownLock();
+    message = '已校准回撤峰值基准线并解除回撤锁仓限制';
+  } else if (action === 'CLEAR_COOLDOWN') {
+    botEngine.clearCooldowns();
+    message = '已解除全平冷却锁并校准开仓质量门槛';
+  } else if (action === 'OPTIMIZE_SMALL_CAPITAL') {
+    botEngine.optimizeSmallCapitalConfig();
+    message = '已切换小资金自适应配比 (单笔风控 ≤ 2%, 杠杆上限 ≤ 5x)';
+  } else if (action === 'SYNC_ACCOUNT') {
+    if (botEngine.hasApiCredentials()) {
+      await botEngine.syncLiveAccountNow(true);
+    }
+    await botEngine.refreshMarketPreview();
+    message = '已重新执行交易所接口同步与盘口行情扫描';
+  } else {
+    return res.status(400).json({ success: false, message: '未知修复动作类型' });
+  }
+
+  return res.json({
+    success: true,
+    message,
+    status: botEngine.getStatus(),
+  });
+});
+
 // Proxy Binance Klines
 app.get('/api/binance/klines', async (req, res) => {
   try {
@@ -262,10 +295,86 @@ async function startServer() {
     });
   }
 
-  app.listen(PORT, '0.0.0.0', () => {
+  const httpServer = http.createServer(app);
+  const wss = new WebSocketServer({ noServer: true });
+
+  httpServer.on('upgrade', (request, socket, head) => {
+    try {
+      const reqUrl = new URL(request.url || '/', `http://${request.headers.host || 'localhost'}`);
+      if (reqUrl.pathname !== '/ws/bot-status') {
+        socket.destroy();
+        return;
+      }
+      const token = (reqUrl.searchParams.get('token') || '').trim();
+      if (!token || !activeTokens.has(token)) {
+        socket.write('HTTP/1.1 401 Unauthorized\r\n\r\n');
+        socket.destroy();
+        return;
+      }
+
+      wss.handleUpgrade(request, socket, head, (ws) => {
+        wss.emit('connection', ws, request);
+      });
+    } catch {
+      socket.destroy();
+    }
+  });
+
+  wss.on('connection', (ws: WebSocket) => {
+    let isAlive = true;
+    ws.on('pong', () => {
+      isAlive = true;
+    });
+
+    // 1. Immediate initial authoritative state hydration
+    try {
+      ws.send(JSON.stringify({ type: 'status:init', status: botEngine.getStatus() }));
+    } catch {
+      // ignore
+    }
+
+    if (botEngine.hasApiCredentials()) {
+      botEngine.syncLiveAccountIfStale(3000).catch(() => {});
+    }
+
+    // 2. Push subsequent delta/full status events in real time without polling
+    const unsubscribe = botEngine.subscribe((statusSnapshot) => {
+      if (ws.readyState === WebSocket.OPEN) {
+        try {
+          ws.send(JSON.stringify({ type: 'status:update', status: statusSnapshot }));
+        } catch {
+          // ignore
+        }
+      }
+    });
+
+    const heartbeatTimer = setInterval(() => {
+      if (ws.readyState !== WebSocket.OPEN) return;
+      if (!isAlive) {
+        ws.terminate();
+        return;
+      }
+      isAlive = false;
+      try {
+        ws.ping();
+      } catch {
+        // ignore
+      }
+    }, 25_000);
+    heartbeatTimer.unref?.();
+
+    const cleanup = () => {
+      clearInterval(heartbeatTimer);
+      unsubscribe();
+    };
+    ws.on('close', cleanup);
+    ws.on('error', cleanup);
+  });
+
+  httpServer.listen(PORT, '0.0.0.0', () => {
     console.log(`\n=============================================================================`);
-    console.log(`  🚀 币安合约多币种 5m/15m/30m 自动量化与密码保护服务已启动`);
-    console.log(`  服务端口: http://0.0.0.0:${PORT}`);
+    console.log(`  🚀 币安合约多币种 5m/15m/30m 自动量化与 WebSocket 实时推送服务已启动`);
+    console.log(`  服务端口: http://0.0.0.0:${PORT} (WS: /ws/bot-status)`);
     console.log(`  公网访问登录保护: 开启 (默认密码: admin123 或 ADMIN_PASSWORD)`);
     console.log(`=============================================================================\n`);
   });

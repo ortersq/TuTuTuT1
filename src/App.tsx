@@ -8,6 +8,8 @@ import { PnLVolatilityHeatmap } from './components/PnLVolatilityHeatmap';
 import { SelfLearningDashboard } from './components/SelfLearningDashboard';
 import { LoginModal } from './components/LoginModal';
 import { BotStatus } from './server/botEngine';
+import { useRealtimeWebSocket } from './hooks/useRealtimeWebSocket';
+import { RootCauseFixActionType } from './utils/logRootCause';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('monitor');
@@ -115,13 +117,31 @@ export default function App() {
     }
   }, [authToken, applyStatusSafely]);
 
-  useEffect(() => {
-    if (isAuthenticated) {
-      fetchStatus();
-      const intervalId = setInterval(fetchStatus, 3000);
-      return () => clearInterval(intervalId);
-    }
-  }, [isAuthenticated, fetchStatus]);
+  const handleStatusPush = useCallback((nextStatus: BotStatus) => {
+    const seq = ++requestSeqRef.current;
+    applyStatusSafely(nextStatus, seq);
+  }, [applyStatusSafely]);
+
+  const handleAuthExpired = useCallback(() => {
+    setIsAuthenticated(false);
+    localStorage.removeItem('quant_auth_token');
+    setAuthToken(null);
+  }, []);
+
+  const preferVisionFallback = Boolean(
+    botStatus?.liveSyncInfo?.errorMessage?.includes('restricted location')
+  );
+
+  const { wsDiagnostics, reconnectAllWs } = useRealtimeWebSocket({
+    isAuthenticated,
+    authToken,
+    monitoredSymbols: botStatus?.monitoredSymbols || ['BTCUSDT', 'ETHUSDT', 'XAUUSDT', 'NVDAUSDT', 'CLUSDT'],
+    preferVisionFallback,
+    onStatusSnapshot: handleStatusPush,
+    onStatusTickerPatch: (updater) => setBotStatus((prev) => updater(prev)),
+    onAuthExpired: handleAuthExpired,
+    onFallbackHttpFetch: fetchStatus,
+  });
 
   const handleLoginSuccess = (token: string) => {
     setAuthToken(token);
@@ -336,6 +356,42 @@ export default function App() {
     }
   };
 
+  const handleExecuteAnomalyFix = async (
+    actionType: RootCauseFixActionType
+  ): Promise<{ success: boolean; message: string }> => {
+    if (actionType === 'OPEN_SETTINGS') {
+      setActiveTab('settings');
+      return { success: true, message: '已跳转至「动态币种 & API 配置」页面核对参数' };
+    }
+    const token = authToken || localStorage.getItem('quant_auth_token');
+    if (!token) {
+      return { success: false, message: '登录凭证已失效，请重新登录' };
+    }
+    try {
+      const seq = ++requestSeqRef.current;
+      const res = await fetch('/api/bot/fix-anomaly', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ action: actionType }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.status) {
+        applyStatusSafely(data.status, seq);
+      } else {
+        await fetchStatus();
+      }
+      return {
+        success: Boolean(res.ok && data?.success),
+        message: data?.message || (res.ok ? '已执行异常修复动作' : '修复请求执行失败'),
+      };
+    } catch {
+      return { success: false, message: '网络异常，未能触发修复请求' };
+    }
+  };
+
   if (isCheckingAuth) {
     return (
       <div className="min-h-screen bg-[#0b0e14] flex items-center justify-center text-xs text-slate-400">
@@ -379,6 +435,8 @@ export default function App() {
         {activeTab === 'monitor' && (
           <MultiSymbolScanner
             status={botStatus}
+            wsDiagnostics={wsDiagnostics}
+            onReconnectWs={reconnectAllWs}
             onRefreshStatus={fetchStatus}
             onSyncLive={handleSyncLiveAccount}
             onClosePosition={handleClosePosition}
@@ -409,7 +467,9 @@ export default function App() {
         {activeTab === 'logs' && (
           <SystemLogConsole
             logs={botStatus?.logs || []}
+            status={botStatus}
             onRefresh={fetchStatus}
+            onExecuteFix={handleExecuteAnomalyFix}
           />
         )}
 
