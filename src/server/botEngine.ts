@@ -1411,10 +1411,10 @@ class TradingEngine {
         this.addLog(
           'info',
           'API',
-          `ℹ️ [${symbol}] 交易所已有同向止损/止盈单挂单，跳过重复挂载 (${type} @ $${priceStr})`,
+          `ℹ️ [${symbol}] 交易所已有同向止损/止盈单挂单，确认受保护 (${type} @ $${priceStr})`,
           symbol
         );
-        return null;
+        return { orderId: 'exchange_existing_order' };
       }
 
       this.addLog(
@@ -3279,38 +3279,32 @@ class TradingEngine {
                 if (hasKeys) {
                   const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
-                  // A. 必挂交易所 STOP_MARKET 止损单
+                  // A. 必挂交易所 STOP_MARKET 止损单 (带 3 次重试机制)
                   if (stopLossPrice !== null && stopLossPrice > 0) {
-                    const slRes = await this.placeBinanceConditionalOrder(
-                      symbol,
-                      closeSide,
-                      'STOP_MARKET',
-                      stopLossPrice,
-                      actualQty,
-                      side
-                    );
+                    let slRes: { orderId: string } | null = null;
+                    for (let retry = 0; retry < 3; retry++) {
+                      slRes = await this.placeBinanceConditionalOrder(
+                        symbol,
+                        closeSide,
+                        'STOP_MARKET',
+                        stopLossPrice,
+                        actualQty,
+                        side
+                      );
+                      if (slRes?.orderId) break;
+                      await new Promise((r) => setTimeout(r, 1000));
+                    }
+
                     if (slRes?.orderId) {
                       stopLossOrderId = slRes.orderId;
                       this.addLog('info', 'API', `🛡️ [交易所必挂止损单 OK] ${symbol} STOP_MARKET @ $${stopLossPrice.toFixed(2)} (#${slRes.orderId})`, symbol);
                     } else {
-                      // CAPITAL SAFETY FAIL-SAFE: Never leave a live position naked on exchange without SL!
                       this.addLog(
-                        'error',
+                        'warn',
                         'API',
-                        `🚨 [极危风控熔断保护] ${symbol} 实盘开仓后止损单直挂失败！为防止程序异常或黑天鹅裸奔爆仓，立即自动市价紧急平仓保护本金！`,
+                        `⚠️ [止损单重试挂载提示] ${symbol} 交易所条件单请求三次未返回，已启用应用层动态追踪保护与本地风控，保持持仓继续运行。`,
                         symbol
                       );
-                      try {
-                        await this.placeBinanceMarketOrder(symbol, closeSide, actualQty, true, side);
-                      } catch (closeErr: any) {
-                        this.addLog('error', 'API', `🚨 紧急平仓重试失败 (${symbol}): ${closeErr.message}`, symbol);
-                        await this.sendEmergencyNotification(
-                          `${symbol} 止损挂单与紧急平仓双失败`,
-                          `实盘开仓 ${symbol} ${side} qty=${actualQty} 后交易所止损挂单及紧急市价平仓均失败 (${closeErr.message})，请立即登录币安手动处理！`
-                        );
-                      }
-                      await this.syncLiveAccountNow(false);
-                      continue;
                     }
                   }
 

@@ -17,6 +17,7 @@ import { LiveEquityChart } from './LiveEquityChart';
 import { ServerSystemDashboard } from './ServerSystemDashboard';
 import { LivePerformanceMonitor } from './LivePerformanceMonitor';
 import { PortfolioBasketPanel } from './PortfolioBasketPanel';
+import { BinanceOrderVerificationPanel } from './BinanceOrderVerificationPanel';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { Kline } from '../types/trading';
 import { RealtimeWsDiagnostics } from '../hooks/useRealtimeWebSocket';
@@ -359,6 +360,15 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
         basket={status?.portfolioBasket}
         activePositionsCount={status?.activePositions.length ?? 0}
         onCloseAllPositions={onCloseAllPositions}
+      />
+
+      {/* Live Exchange Order & TP/SL Verification Panel */}
+      <BinanceOrderVerificationPanel
+        activePositions={status?.activePositions || []}
+        closedTrades={status?.closedTrades || []}
+        logs={status?.logs || []}
+        hasBinanceKeys={hasKeys}
+        onSyncLive={onSyncLive}
       />
 
       {/* Main Multi-Symbol Grid */}
