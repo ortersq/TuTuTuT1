@@ -109,3 +109,46 @@ test('a normal response is parsed and used-weight header is recorded', async () 
     await stub.close();
   }
 });
+
+test('cancelAlgoOrder sends algoId only (symbol is rejected with -1106)', async () => {
+  let seenUrl = '';
+  const stub = await startStubServer((req, res) => {
+    seenUrl = String(req.url || '');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ algoId: 42, code: '200', msg: 'success' }));
+  });
+  try {
+    const rest = new BinanceFuturesRest(
+      () => stub.url,
+      () => 'key',
+      () => 'secret'
+    );
+    await rest.cancelAlgoOrder('42');
+    assert.match(seenUrl, /\/fapi\/v1\/algoOrder/);
+    assert.match(seenUrl, /algoId=42/);
+    assert.doesNotMatch(seenUrl, /symbol=/);
+  } finally {
+    await stub.close();
+  }
+});
+
+test('cancelAllAlgoOpenOrders hits the bulk algo endpoint with the symbol', async () => {
+  let seenUrl = '';
+  const stub = await startStubServer((req, res) => {
+    seenUrl = String(req.url || '');
+    res.writeHead(200, { 'content-type': 'application/json' });
+    res.end(JSON.stringify({ code: '200', msg: 'success' }));
+  });
+  try {
+    const rest = new BinanceFuturesRest(
+      () => stub.url,
+      () => 'key',
+      () => 'secret'
+    );
+    await rest.cancelAllAlgoOpenOrders('CLUSDT');
+    assert.match(seenUrl, /\/fapi\/v1\/algoOpenOrders/);
+    assert.match(seenUrl, /symbol=CLUSDT/);
+  } finally {
+    await stub.close();
+  }
+});

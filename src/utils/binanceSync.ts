@@ -189,13 +189,23 @@ export function parseBinanceOpenPositions(
         ? parsedTpPrice
         : existingLocal?.takeProfitPrice ?? null;
 
+    // Order ids must remember WHICH book they came from: a conditional order placed through the
+    // Algo service can only be cancelled through the Algo endpoint, and `DELETE /fapi/v1/order`
+    // silently fails for it. Losing that information is how duplicate SL/TP orders piled up
+    // (a new order every ratchet, the old one never actually cancelled).
+    const orderIdOf = (o: any): string => {
+      const raw = String(o?.orderId || o?.algoId || '');
+      if (!raw) return '';
+      return o?.__source === 'ALGO' ? `algo:${raw}` : raw;
+    };
+
     const stopLossOrderId = slOrder
-      ? String(slOrder.orderId || slOrder.algoId || '')
+      ? orderIdOf(slOrder)
       : options.ordersAuthoritative === true
       ? undefined // authoritative "no SL on the exchange" — never keep a stale id
       : existingLocal?.stopLossOrderId;
     const takeProfitOrderId = tpOrder
-      ? String(tpOrder.orderId || tpOrder.algoId || '')
+      ? orderIdOf(tpOrder)
       : options.ordersAuthoritative === true
       ? undefined
       : existingLocal?.takeProfitOrderId;

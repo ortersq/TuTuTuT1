@@ -366,11 +366,27 @@ export class BinanceFuturesRest {
     });
   }
 
-  public cancelAlgoOrder(symbol: string, algoId: string): Promise<any> {
+  /**
+   * Cancel one Algo conditional order.
+   * Binance's signature is `DELETE /fapi/v1/algoOrder` with **algoId only** — sending `symbol`
+   * as well is rejected with `-1106 Parameter 'symbol' sent when not required`, which silently
+   * left every stale stop alive. Do not add symbol here.
+   */
+  public cancelAlgoOrder(algoId: string): Promise<any> {
     return this.request('/fapi/v1/algoOrder', {
       method: 'DELETE',
       signed: true,
-      params: { symbol, algoId },
+      params: { algoId },
+      weight: 1,
+    });
+  }
+
+  /** Cancel every open Algo conditional order for a symbol in one call. */
+  public cancelAllAlgoOpenOrders(symbol: string): Promise<any> {
+    return this.request('/fapi/v1/algoOpenOrders', {
+      method: 'DELETE',
+      signed: true,
+      params: { symbol },
       weight: 1,
     });
   }

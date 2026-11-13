@@ -249,6 +249,7 @@ class TradingEngine {
   private lastHistorySyncAt: number = 0;
   private lastProtectiveRepairAt: number = 0;
   private lastTrailingExchangeSyncAt: number = 0;
+  private lastOrphanSweepAt: number = 0;
   /** Per-symbol cooldown so correlation hedging cannot chop the same position every 10s. */
   private lastCorrelationHedgeAt: Map<string, number> = new Map();
   /** Back-off after repeated failed close attempts so a rejected order cannot spam every cycle. */
@@ -1197,7 +1198,9 @@ class TradingEngine {
         const algo = await this.binanceRest.openAlgoOrders(sym);
         ordersBySymbol.set(sym, [
           ...(Array.isArray(normal) ? normal : []),
-          ...(Array.isArray(algo) ? algo : []),
+          // Tag the source so the id can be turned back into `algo:<algoId>` and cancelled
+          // through the correct endpoint.
+          ...(Array.isArray(algo) ? algo.map((o: any) => ({ ...o, __source: 'ALGO' })) : []),
         ]);
       } catch (err: any) {
         ordersKnown = false;
@@ -1232,6 +1235,14 @@ class TradingEngine {
       await this.repairProtectiveOrders(parsedPositions);
     }
     this.activePositions = parsedPositions;
+
+    // Self-heal duplicate SL/TP orders left behind by failed replacements.
+    if (ordersKnown) {
+      await this.pruneRedundantProtectiveOrders(ordersBySymbol);
+    }
+
+    // Clean up orders that belong to symbols with no position (old churn leftovers).
+    await this.sweepOrphanOrders(new Set(symbolsHeld));
 
     // ---------------------------------------------------------------- 5. hedge mode (1/min)
     if (now - this.lastHedgeModeCheck > 60_000 && this.binanceRest.canAfford(30)) {
@@ -1693,16 +1704,35 @@ class TradingEngine {
   /**
    * Cancel a specific order on Binance Futures. Algo ids are prefixed with `algo:`.
    */
+  /**
+   * Cancel a specific order on Binance Futures.
+   *
+   * Order ids from the Algo book are prefixed with `algo:`. Because an id may have been stored
+   * before the prefix existed (or the order may have been migrated between books), we try the
+   * expected endpoint first and then the other one — a "not found" on the first book must not
+   * leave a live stop behind.
+   */
   private async cancelBinanceOrder(symbol: string, orderId: string): Promise<void> {
     if (!this.hasApiCredentials() || !orderId) return;
     if (orderId === 'exchange_existing_order') return; // legacy sentinel from an older build
     const isAlgo = orderId.startsWith('algo:');
     const rawId = isAlgo ? orderId.slice(5) : orderId;
-    try {
-      if (isAlgo) await this.binanceRest.cancelAlgoOrder(symbol, rawId);
-      else await this.binanceRest.cancelOrder(symbol, rawId);
-    } catch {
-      // order may already be filled/cancelled — nothing to do
+    const attempts: Array<() => Promise<any>> = isAlgo
+      ? [
+          () => this.binanceRest.cancelAlgoOrder(rawId),
+          () => this.binanceRest.cancelOrder(symbol, rawId),
+        ]
+      : [
+          () => this.binanceRest.cancelOrder(symbol, rawId),
+          () => this.binanceRest.cancelAlgoOrder(rawId),
+        ];
+    for (const attempt of attempts) {
+      try {
+        await attempt();
+        return;
+      } catch {
+        // try the other book
+      }
     }
   }
 
@@ -1718,15 +1748,170 @@ class TradingEngine {
       // ignore: symbol may have no open orders
     }
 
-    const tracked = this.activePositions.filter((p) => p.symbol === symbol);
-    for (const pos of tracked) {
-      for (const id of [pos.stopLossOrderId, pos.takeProfitOrderId]) {
-        if (id && id.startsWith('algo:')) {
+    // Sweep the Algo book explicitly: these orders survive `allOpenOrders` and, for a flat
+    // position, would later fire as a reverse entry.
+    try {
+      await this.binanceRest.cancelAllAlgoOpenOrders(symbol);
+    } catch {
+      // Fall back to cancelling them one by one when the bulk endpoint is unavailable.
+      try {
+        const algos = await this.binanceRest.openAlgoOrders(symbol);
+        for (const order of algos) {
+          const algoId = String(order?.algoId || '');
+          if (!algoId) continue;
           try {
-            await this.binanceRest.cancelAlgoOrder(symbol, id.slice(5));
+            await this.binanceRest.cancelAlgoOrder(algoId);
           } catch {
             // already gone
           }
+        }
+      } catch {
+        // algo book unavailable on this deployment — fall back to locally tracked ids below
+      }
+    }
+
+    const tracked = this.activePositions.filter((p) => p.symbol === symbol);
+    for (const pos of tracked) {
+      for (const id of [pos.stopLossOrderId, pos.takeProfitOrderId]) {
+        if (id) await this.cancelBinanceOrder(symbol, id);
+      }
+    }
+  }
+
+  /**
+   * Remove protective orders that belong to symbols with NO position at all.
+   *
+   * These are the leftovers of the old open/close churn (or of a position closed manually on the
+   * phone): nothing references them any more, so nothing ever cancels them, and they can later
+   * fire as a reverse entry. Runs at most once a minute and only for symbols the exchange itself
+   * reports as flat, so it can never strip protection from a live position.
+   */
+  private async sweepOrphanOrders(heldSymbols: Set<string>): Promise<void> {
+    if (!this.hasApiCredentials()) return;
+    const now = Date.now();
+    if (now - this.lastOrphanSweepAt < 60_000) return;
+    if (!this.binanceRest.canAfford(12)) return;
+    this.lastOrphanSweepAt = now;
+
+    for (const sym of this.monitoredSymbols) {
+      if (heldSymbols.has(sym)) continue;
+      try {
+        const normal = await this.binanceRest.openOrders(sym);
+        const algo = await this.binanceRest.openAlgoOrders(sym);
+        const count = (Array.isArray(normal) ? normal.length : 0) + (Array.isArray(algo) ? algo.length : 0);
+        if (count === 0) continue;
+        await this.cancelAllBinanceOrders(sym);
+        this.addLog(
+          'warn',
+          'API',
+          `🧹 [孤儿挂单清理] ${sym} 已无持仓但残留 ${count} 张挂单，已全部撤销（避免之后反向开仓）`,
+          sym
+        );
+      } catch {
+        // per-symbol failure must not block the sync
+      }
+    }
+  }
+
+  private orderIdOf(order: any): string {
+    const raw = String(order?.orderId || order?.algoId || '');
+    if (!raw) return '';
+    return order?.__source === 'ALGO' ? `algo:${raw}` : raw;
+  }
+
+  /**
+   * Remove duplicate protective orders for a symbol, keeping exactly one SL and one TP.
+   *
+   * This is the self-healing counterpart of every "replace the stop" path (breakeven / trailing
+   * stop): those place the NEW order first and then cancel the old one, so any failed cancel
+   * (wrong order book, timeout, id mismatch) left the old order live. Over one trending move the
+   * account ends up with a pile of stale SL/TP orders while only one position exists — exactly the
+   * "1 position, 12 orders" symptom.
+   *
+   * The orders passed in are the snapshot already fetched by the caller, so this costs only the
+   * DELETEs for the duplicates found.
+   */
+  private async pruneRedundantProtectiveOrders(ordersBySymbol: Map<string, any[]>): Promise<void> {
+    if (!this.hasApiCredentials()) return;
+
+    for (const pos of this.activePositions) {
+      const symbol = pos.symbol;
+      const allOrders = ordersBySymbol.get(symbol);
+      if (!Array.isArray(allOrders) || allOrders.length < 2) continue;
+      // Hedge mode can hold a LONG and a SHORT on the same symbol; only touch our own side.
+      const orders = allOrders.filter(
+        (o) => !o?.positionSide || o.positionSide === 'BOTH' || o.positionSide === pos.side
+      );
+      if (orders.length < 2) continue;
+
+      const classify = (o: any): 'SL' | 'TP' | null => {
+        const t = String(o?.type || o?.orderType || '').toUpperCase();
+        if (t === 'STOP_MARKET' || t === 'STOP') return 'SL';
+        if (t === 'TAKE_PROFIT_MARKET' || t === 'TAKE_PROFIT') return 'TP';
+        return null;
+      };
+      const rawIdOf = (o: any): string => String(o?.orderId || o?.algoId || '');
+      const priceOf = (o: any): number => parseFloat(o?.stopPrice || o?.triggerPrice || '0') || 0;
+
+      const groups: Array<{ kind: 'SL' | 'TP'; list: any[]; keepId?: string; target: number | null }> = [
+        {
+          kind: 'SL',
+          list: orders.filter((o) => classify(o) === 'SL'),
+          keepId: pos.stopLossOrderId,
+          target: pos.stopLossPrice,
+        },
+        {
+          kind: 'TP',
+          list: orders.filter((o) => classify(o) === 'TP'),
+          keepId: pos.takeProfitOrderId,
+          target: pos.takeProfitPrice,
+        },
+      ];
+
+      for (const group of groups) {
+        if (group.list.length <= 1) continue;
+        const keepRaw = (group.keepId || '').replace(/^algo:/, '');
+        let keepIdx = keepRaw ? group.list.findIndex((o) => rawIdOf(o) === keepRaw) : -1;
+        if (keepIdx < 0 && group.target && group.target > 0) {
+          let best = Infinity;
+          group.list.forEach((o, i) => {
+            const p = priceOf(o);
+            if (!(p > 0)) return;
+            const d = Math.abs(p - group.target!);
+            if (d < best) {
+              best = d;
+              keepIdx = i;
+            }
+          });
+        }
+        // Never wipe every order: if we cannot identify which one to keep, leave the book alone.
+        if (keepIdx < 0) continue;
+
+        let cancelled = 0;
+        for (let i = 0; i < group.list.length; i++) {
+          if (i === keepIdx) continue;
+          if (cancelled >= 10) break;
+          const id = this.orderIdOf(group.list[i]);
+          if (!id) continue;
+          if (keepRaw && id.replace(/^algo:/, '') === keepRaw) continue;
+          await this.cancelBinanceOrder(symbol, id);
+          cancelled += 1;
+          // Gentle pacing: Binance also rate-limits cancels per 10s window.
+          await new Promise((r) => setTimeout(r, 80));
+        }
+
+        if (cancelled > 0) {
+          const keptId = this.orderIdOf(group.list[keepIdx]) || group.keepId;
+          if (group.kind === 'SL') pos.stopLossOrderId = keptId || pos.stopLossOrderId;
+          else pos.takeProfitOrderId = keptId || pos.takeProfitOrderId;
+          this.addLog(
+            'warn',
+            'API',
+            `🧹 [冗余挂单清理] ${symbol} 发现 ${group.list.length} 张${
+              group.kind === 'SL' ? '止损' : '止盈'
+            }单，已撤销 ${cancelled} 张重复单，仅保留 1 张 (#${keptId})`,
+            symbol
+          );
         }
       }
     }

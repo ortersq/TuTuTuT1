@@ -186,6 +186,46 @@ test('parseBinanceOpenPositions does not inherit a stale SL/TP id when orders ar
   assert.equal(withUnknownOrders[0].stopLossOrderId, '12345');
 });
 
+test('parseBinanceOpenPositions keeps the algo: prefix so the right cancel endpoint is used', () => {
+  const posList = [
+    {
+      symbol: 'CLUSDT',
+      positionAmt: '1.0',
+      entryPrice: '87.00',
+      markPrice: '87.10',
+      unRealizedProfit: '0.10',
+      leverage: '3',
+      updateTime: 1700000000000,
+    },
+  ];
+  const algoOrder = {
+    symbol: 'CLUSDT',
+    orderType: 'STOP_MARKET',
+    triggerPrice: '85.00',
+    algoId: 999001,
+    __source: 'ALGO',
+  };
+  const legacyOrder = {
+    symbol: 'CLUSDT',
+    type: 'TAKE_PROFIT_MARKET',
+    stopPrice: '90.00',
+    orderId: 888002,
+  };
+
+  const mapped = parseBinanceOpenPositions(posList, [], [], [], 3, 1700000000001, {
+    ordersKnown: true,
+    ordersAuthoritative: true,
+    ordersBySymbol: new Map([['CLUSDT', [algoOrder, legacyOrder]]]),
+  });
+
+  // Without the prefix the engine would call DELETE /fapi/v1/order with an algoId, get -2011 and
+  // leave the stop alive forever (the "1 position / 12 orders" symptom).
+  assert.equal(mapped[0].stopLossOrderId, 'algo:999001');
+  assert.equal(mapped[0].stopLossPrice, 85);
+  assert.equal(mapped[0].takeProfitOrderId, '888002');
+  assert.equal(mapped[0].takeProfitPrice, 90);
+});
+
 test('mergeClosedTrades keeps attributed local records and does not double count exchange fills', () => {
   const local = [
     {
