@@ -9,6 +9,8 @@ import {
   CheckCircle2,
   Filter,
   RotateCcw,
+  Eraser,
+  Trash2,
 } from 'lucide-react';
 import {
   analyzeLogRootCauses,
@@ -87,6 +89,20 @@ export const SystemLogConsole: React.FC<SystemLogConsoleProps> = ({
     } finally {
       setActiveFixType(null);
     }
+  };
+
+  const handleResetJournal = async () => {
+    const positions = status?.activePositions?.length ?? 0;
+    const ok = window.confirm(
+      '确定要清空并重新开始吗？\n\n' +
+        '将清空：运行日志、交割单、净值曲线、执行/对冲记录、自学习权重\n' +
+        '不会平仓，也不会改变交易所数据。\n' +
+        (positions > 0
+          ? `\n当前有 ${positions} 笔实盘持仓，会继续保留监控（不会被平掉）。`
+          : '\n当前无持仓。')
+    );
+    if (!ok) return;
+    await handleTriggerFix('RESET_JOURNAL');
   };
 
   const filteredLogs = logs.filter((log) => {
@@ -348,6 +364,28 @@ export const SystemLogConsole: React.FC<SystemLogConsoleProps> = ({
             >
               <Download className="w-3.5 h-3.5" />
               <span>{isExporting ? '导出中...' : '📥 导出诊断日志包 (.json)'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleTriggerFix('CLEAR_LOGS')}
+              disabled={activeFixType !== null}
+              className="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="仅清空控制台里的运行日志（日志只存在内存中，不会影响持仓与交割单）"
+            >
+              <Eraser className="w-3.5 h-3.5" />
+              <span>{activeFixType === 'CLEAR_LOGS' ? '清空中...' : '清空日志'}</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => handleResetJournal()}
+              disabled={activeFixType !== null}
+              className="px-3 py-1.5 bg-rose-500/15 hover:bg-rose-500/25 border border-rose-500/40 text-rose-300 rounded-xl text-xs font-semibold transition-colors flex items-center gap-1.5 cursor-pointer disabled:opacity-50"
+              title="清空日志 + 交割单 + 净值曲线 + 自学习权重，并设置水位线避免交易所旧记录再次导入（实盘持仓不会被平掉）"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+              <span>{activeFixType === 'RESET_JOURNAL' ? '重置中...' : '重置账本（全新开始）'}</span>
             </button>
 
             <button

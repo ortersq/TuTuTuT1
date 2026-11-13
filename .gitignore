@@ -6,3 +6,7 @@ coverage/
 *.log
 .env*
 !.env.example
+.journal-state.json
+binance_quant_diagnostic_log_*.json
+.pnpm-store/
+.tmp*/

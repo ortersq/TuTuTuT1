@@ -281,6 +281,27 @@ app.post('/api/bot/fix-anomaly', requireAuth, async (req, res) => {
   } else if (action === 'OPTIMIZE_SMALL_CAPITAL') {
     botEngine.optimizeSmallCapitalConfig();
     message = '已切换小资金自适应配比 (单笔风控 ≤ 2%, 杠杆上限 ≤ 5x)';
+  } else if (action === 'CLEAR_LOGS') {
+    const result = botEngine.resetJournal({
+      clearLogs: true,
+      clearTrades: false,
+      resetLearning: false,
+      // Silent: the point of this action is an empty console, so no confirmation line is added.
+      silent: true,
+    });
+    message = `已清空 ${result.clearedLogs} 条运行日志`;
+  } else if (action === 'RESET_JOURNAL') {
+    const result = botEngine.resetJournal({
+      clearLogs: true,
+      clearTrades: true,
+      resetLearning: true,
+    });
+    message =
+      `已重置账本：清空 ${result.clearedLogs} 条日志、${result.clearedTrades} 笔交割单，` +
+      `自学习权重归零，净值基准重设。` +
+      (result.activePositionsKept > 0
+        ? ` ${result.activePositionsKept} 笔实盘持仓继续保留监控。`
+        : '');
   } else if (action === 'SYNC_ACCOUNT') {
     if (botEngine.hasApiCredentials()) {
       await botEngine.syncLiveAccountNow(true);

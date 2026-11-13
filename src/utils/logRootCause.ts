@@ -12,6 +12,8 @@ export type RootCauseFixActionType =
   | 'CLEAR_COOLDOWN'
   | 'OPTIMIZE_SMALL_CAPITAL'
   | 'RELAX_QUALITY_THRESHOLD'
+  | 'CLEAR_LOGS'
+  | 'RESET_JOURNAL'
   | 'OPEN_SETTINGS';
 
 export interface LogEntryLike {

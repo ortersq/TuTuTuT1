@@ -256,6 +256,15 @@ class TradingEngine {
   private closeFailureCount: Map<string, number> = new Map();
   /** Last time we attached exchange protection for `symbol:side` (prevents duplicate SL/TP storms). */
   private protectionPlacedAt: Map<string, number> = new Map();
+  /**
+   * Journal cut-off. Exchange fills older than this are NOT re-imported after a reset, otherwise
+   * the old 交割单 / 净值曲线 would come straight back on the next sync and the reset would be
+   * cosmetic. 0 means "no cut-off" (never reset).
+   */
+  private journalStartedAt: number = 0;
+  /** Journal cut-off is persisted to disk so a reset survives a process restart. */
+  private persistenceEnabled: boolean = false;
+  private readonly journalStatePath: string = path.join(process.cwd(), '.journal-state.json');
 
   private balance: number = 10000;
   private equity: number = 10000;
@@ -386,6 +395,33 @@ class TradingEngine {
       }
       this.ensureMarketPreviewLoop();
       this.refreshMarketPreview().catch(() => {});
+    }
+    this.persistenceEnabled = !isTestRunner;
+    if (this.persistenceEnabled) this.loadJournalState();
+  }
+
+  /** Restore the journal cut-off written by a previous reset (see `resetJournal`). */
+  private loadJournalState(): void {
+    try {
+      if (!fs.existsSync(this.journalStatePath)) return;
+      const raw = JSON.parse(fs.readFileSync(this.journalStatePath, 'utf8'));
+      const cut = Number(raw?.journalStartedAt);
+      if (Number.isFinite(cut) && cut > 0) this.journalStartedAt = cut;
+    } catch {
+      // corrupt/unreadable state file must never block startup
+    }
+  }
+
+  private saveJournalState(): void {
+    if (!this.persistenceEnabled) return;
+    try {
+      fs.writeFileSync(
+        this.journalStatePath,
+        JSON.stringify({ journalStartedAt: this.journalStartedAt, updatedAt: Date.now() }, null, 2),
+        'utf8'
+      );
+    } catch (err: any) {
+      this.addLog('warn', 'SYSTEM', `⚠️ 账本水位线写入失败（重启后旧记录可能重新导入）: ${err?.message || err}`);
     }
   }
 
@@ -1397,7 +1433,12 @@ class TradingEngine {
     this.lastHistorySyncAt = now;
     try {
       const incomes = await this.binanceRest.income(80);
-      const incomeList = Array.isArray(incomes) ? incomes : [];
+      const allIncomes: any[] = Array.isArray(incomes) ? incomes : [];
+      // Honour the journal cut-off so a reset is permanent (Binance still holds the old fills).
+      const incomeList =
+        this.journalStartedAt > 0
+          ? allIncomes.filter((i: any) => (Number(i?.time) || 0) >= this.journalStartedAt)
+          : allIncomes;
 
       const distinctSyms = Array.from(
         new Set([
@@ -1413,6 +1454,10 @@ class TradingEngine {
       for (const res of tradeResults) {
         if (res.status === 'fulfilled' && Array.isArray(res.value)) allUserTrades.push(...res.value);
       }
+      const userTradesForJournal =
+        this.journalStartedAt > 0
+          ? allUserTrades.filter((t: any) => (Number(t?.time) || 0) >= this.journalStartedAt)
+          : allUserTrades;
 
       const reconstructedHistory = reconstructLiveEquityHistoryFromIncome(
         incomeList,
@@ -1430,7 +1475,11 @@ class TradingEngine {
         this.lastLiveSamplePushTime = now;
       }
 
-      const realClosed = parseBinanceRealClosedTrades(incomeList, allUserTrades, this.leverage);
+      const realClosed = parseBinanceRealClosedTrades(
+        incomeList,
+        userTradesForJournal,
+        this.leverage
+      ).filter((t) => this.journalStartedAt === 0 || t.exitTime >= this.journalStartedAt);
       if (realClosed.length > 0) {
         this.closedTrades = mergeClosedTrades(this.closedTrades, realClosed);
         this.addLog(
@@ -2748,6 +2797,95 @@ class TradingEngine {
       }
     }, 150);
     this.notifyTimer.unref?.();
+  }
+
+  /**
+   * Wipe the operational journal so the dashboard starts from a clean slate.
+   *
+   * - `clearLogs`     : empties the live log console (in-memory, capped at 500 entries).
+   * - `clearTrades`   : empties 交割单 / 净值曲线 / 执行与对冲记录, resets the equity peak and
+   *                     sets a cut-off timestamp so exchange history before it is never re-imported.
+   * - `resetLearning` : resets the self-learning weights to their initial state.
+   *
+   * Open positions are deliberately KEPT: they are real exposure and dropping their records would
+   * leave them unmanaged on the exchange.
+   */
+  public resetJournal(options: {
+    clearLogs?: boolean;
+    clearTrades?: boolean;
+    resetLearning?: boolean;
+    /** Suppress the confirmation log line (used by the "清空日志" button so the console is truly empty). */
+    silent?: boolean;
+  } = {}): {
+    clearedLogs: number;
+    clearedTrades: number;
+    learningReset: boolean;
+    cutoverAt: number;
+    activePositionsKept: number;
+  } {
+    const clearLogs = options.clearLogs !== false;
+    const clearTrades = options.clearTrades !== false;
+    const resetLearning = options.resetLearning !== false;
+
+    const clearedLogs = clearLogs ? this.logs.length : 0;
+    const clearedTrades = clearTrades ? this.closedTrades.length : 0;
+    const activePositionsKept = this.activePositions.length;
+    const cutoverAt = Date.now();
+
+    if (clearLogs) {
+      this.logs = [];
+      this.lastSyncErrorLogTime = 0;
+      this.lastCircuitBreakerLogTime = 0;
+      this.lastDrawdownLockLogTime = 0;
+      this.lastBasketCooldownLogTime = 0;
+      this.lastProtectiveRepairAt = 0;
+      this.lastTrailingExchangeSyncAt = 0;
+    }
+
+    if (clearTrades) {
+      this.closedTrades = [];
+      this.smartExecutionLogs = [];
+      this.correlationHedgingLogs = [];
+      this.basketPeakNetPnl = 0;
+      this.equityHistory = [];
+      // Cut-off: fills / income events older than now must never be re-imported.
+      this.journalStartedAt = cutoverAt;
+      this.saveJournalState();
+      this.hasSyncedLiveHistory = false;
+      this.lastHistorySyncAt = 0;
+      const baseline = this.equity > 0 ? this.equity : Math.max(0, this.balance);
+      this.peakEquity = baseline;
+      this.equityHistory.push({
+        timestamp: cutoverAt,
+        time: new Date(cutoverAt).toLocaleTimeString('zh-CN', { hour12: false }),
+        equity: Number(baseline.toFixed(2)),
+        balance: Number(this.balance.toFixed(2)),
+        unrealizedPnl: this.liveSyncInfo?.syncOk ? this.liveSyncInfo.unrealizedProfit : 0,
+        activePositionsCount: activePositionsKept,
+      });
+    }
+
+    if (resetLearning) {
+      this.patternLearningWeights.clear();
+      this.initPatternLearningState();
+      this.learningGeneration = 1;
+    }
+
+    if (!options.silent) {
+      this.addLog(
+        'success',
+        'SYSTEM',
+        `🧹 [账本重置完成] 已清空 ${clearedLogs} 条日志、${clearedTrades} 笔交割单${
+          resetLearning ? '、自学习权重已归零' : ''
+        }；净值基准重设为 $${this.peakEquity.toFixed(2)}。${
+          activePositionsKept > 0
+            ? `当前 ${activePositionsKept} 笔实盘持仓继续保留监控（不会被清空）。`
+            : '当前无持仓。'
+        }`
+      );
+    }
+    this.notifyListeners(true);
+    return { clearedLogs, clearedTrades, learningReset: resetLearning, cutoverAt, activePositionsKept };
   }
 
   public resetDrawdownLock(): void {
