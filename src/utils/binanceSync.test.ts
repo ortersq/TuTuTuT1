@@ -5,6 +5,7 @@ import {
   reconstructLiveEquityHistoryFromIncome,
   parseBinanceOpenPositions,
   parseBinanceRealClosedTrades,
+  mergeClosedTrades,
 } from './binanceSync';
 
 test('parseBinanceAccountResponse extracts exact real Binance margin & unrealized profit without 10000 fallback', () => {
@@ -115,4 +116,133 @@ test('parseBinanceRealClosedTrades uses real fill prices/PnL instead of hardcode
   assert.equal(closed[0].isPaper, false);
   // Real margin ~ 430 / 5 = 86 -> ~16.51% (not hardcoded 2.5%)
   assert.ok(Math.abs(closed[0].pnlPercent - 16.51) < 0.2);
+  // Entry price must be recovered (was hardcoded to 0): exit 2150 - 14.40/0.2 = 2078
+  assert.ok(Math.abs(closed[0].entryPrice - 2078) < 0.01, `entryPrice=${closed[0].entryPrice}`);
+});
+
+test('parseBinanceOpenPositions does not inherit a stale SL/TP id when orders are known to be absent', () => {
+  const posList = [
+    {
+      symbol: 'ETHUSDT',
+      positionAmt: '0.5',
+      entryPrice: '2100',
+      markPrice: '2120',
+      unRealizedProfit: '10',
+      leverage: '5',
+      updateTime: 1700000000000,
+    },
+  ];
+  const local = [
+    {
+      id: 'pos_1',
+      symbol: 'ETHUSDT',
+      interval: '5m',
+      side: 'LONG' as const,
+      patternName: 'test',
+      entryTime: 1,
+      entryPrice: 2100,
+      currentPrice: 2120,
+      quantity: 0.5,
+      leverage: 5,
+      marginUsed: 210,
+      unrealizedPnl: 10,
+      unrealizedPnlPercent: 4.7,
+      peakPnlUsdt: 10,
+      stopLossPrice: 2050,
+      takeProfitPrice: 2200,
+      trailingPeakPrice: 2120,
+      trailingStopPrice: null,
+      liquidationPrice: 0,
+      strategyUsed: 'pattern_price_action' as const,
+      stopLossOrderId: '12345',
+      takeProfitOrderId: '12346',
+      isPaper: false,
+    },
+  ];
+
+  // ordersAuthoritative=true and no orders returned => the engine must re-attach protection.
+  const withKnownOrders = parseBinanceOpenPositions(posList, [], [], local, 5, 1700000000001, {
+    ordersKnown: true,
+    ordersAuthoritative: true,
+    ordersBySymbol: new Map([['ETHUSDT', []]]),
+  });
+  assert.equal(withKnownOrders[0].stopLossOrderId, undefined);
+  assert.equal(withKnownOrders[0].takeProfitOrderId, undefined);
+  // The price levels themselves are kept as reference for the re-attach logic.
+  assert.equal(withKnownOrders[0].stopLossPrice, 2050);
+
+  // ordersKnown=true but the algo book was unreadable => keep the id, never place a duplicate.
+  const withPartialOrders = parseBinanceOpenPositions(posList, [], [], local, 5, 1700000000001, {
+    ordersKnown: true,
+    ordersAuthoritative: false,
+    ordersBySymbol: new Map([['ETHUSDT', []]]),
+  });
+  assert.equal(withPartialOrders[0].stopLossOrderId, '12345');
+
+  // ordersKnown=false (query failed) => keep the ids, do not double-place orders.
+  const withUnknownOrders = parseBinanceOpenPositions(posList, [], [], local, 5, 1700000000001, {
+    ordersKnown: false,
+  });
+  assert.equal(withUnknownOrders[0].stopLossOrderId, '12345');
+});
+
+test('mergeClosedTrades keeps attributed local records and does not double count exchange fills', () => {
+  const local = [
+    {
+      id: 'binance_fill_CLUSDT_777',
+      symbol: 'CLUSDT',
+      interval: '5m',
+      side: 'LONG' as const,
+      patternName: '本地成交',
+      entryTime: 1000,
+      exitTime: 5000,
+      entryPrice: 87.3,
+      exitPrice: 87.5,
+      quantity: 1,
+      leverage: 3,
+      marginUsed: 29,
+      netPnl: 0.2,
+      pnlPercent: 0.7,
+      exitReason: 'TAKE_PROFIT' as const,
+      strategyUsed: 'pattern_price_action' as const,
+      isPaper: false,
+    },
+  ];
+  const exchange = [
+    {
+      ...local[0],
+      id: 'binance_fill_CLUSDT_777',
+      patternType: 'BINANCE_ACCOUNT_FILL',
+      isExternalExchangeTrade: true,
+      entryPrice: 0,
+    },
+    {
+      ...local[0],
+      id: 'binance_fill_XAUUSDT_888',
+      symbol: 'XAUUSDT',
+      isExternalExchangeTrade: true,
+      exitTime: 5000,
+    },
+  ];
+
+  const merged = mergeClosedTrades(local, exchange);
+  // same id -> the attributed (non-external) version wins
+  const cl = merged.filter((t) => t.symbol === 'CLUSDT');
+  assert.equal(cl.length, 1);
+  assert.equal(cl[0].isExternalExchangeTrade, undefined);
+  assert.equal(cl[0].entryPrice, 87.3);
+  // a genuinely unknown exchange fill is kept
+  assert.equal(merged.filter((t) => t.symbol === 'XAUUSDT').length, 1);
+
+  // Engine close + exchange fill for the same trade with different ids are de-duplicated by time.
+  const localClose = { ...local[0], id: 'pos_abc', exitTime: 9000, symbol: 'NVDAUSDT' };
+  const sameTrade = {
+    ...local[0],
+    id: 'binance_fill_NVDAUSDT_999',
+    symbol: 'NVDAUSDT',
+    exitTime: 9050,
+    isExternalExchangeTrade: true,
+  };
+  const merged2 = mergeClosedTrades([localClose], [sameTrade]);
+  assert.equal(merged2.filter((t) => t.symbol === 'NVDAUSDT').length, 1);
 });

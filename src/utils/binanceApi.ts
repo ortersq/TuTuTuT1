@@ -89,7 +89,12 @@ export interface TickerQuote {
 /**
  * Fast single-call bulk 24hr ticker fetch for Binance Futures (and Spot fallback for crypto if geo-blocked).
  * Populates live prices immediately even before multi-timeframe kline scans finish.
+ *
+ * The bulk endpoint costs weight 40 per call, and both the 10s scan cycle and the 10s preview loop
+ * ask for it, so results are memoised for a few seconds.
  */
+const tickerCache = new Map<string, { at: number; data: Map<string, TickerQuote> }>();
+
 export async function fetchBinanceFuturesTickers(
   symbols: string[],
   baseUrl: string = 'https://fapi.binance.com'
@@ -97,6 +102,12 @@ export async function fetchBinanceFuturesTickers(
   const result = new Map<string, TickerQuote>();
   const wanted = new Set(symbols.map((s) => s.toUpperCase()));
   if (wanted.size === 0) return result;
+
+  const cacheKey = `${baseUrl}|${[...wanted].sort().join(',')}`;
+  const cached = tickerCache.get(cacheKey);
+  if (cached && Date.now() - cached.at < 5_000) {
+    return new Map(cached.data);
+  }
 
   // 1. Primary: Binance USDT-M Futures bulk 24hr ticker (supports Crypto + TradFi perps like XAU/NVDA/CL)
   try {
@@ -200,6 +211,7 @@ export async function fetchBinanceFuturesTickers(
     );
   }
 
+  tickerCache.set(cacheKey, { at: Date.now(), data: new Map(result) });
   return result;
 }
 
@@ -224,15 +236,15 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
   let lastError: Error | null = null;
   const startTime = Date.now();
 
-  // Special handling for TradFi / Commodity symbols (XAUUSDT, NVDAUSDT, CLUSDT) not listed on Binance Futures
-  const isTradFiSymbol = ['XAUUSDT', 'NVDAUSDT', 'CLUSDT', 'GOLD', 'USOIL'].includes(cleanSymbol);
-
-  const endpointsToTry = isTradFiSymbol
-    ? [
-        `https://data-api.binance.vision/api/v3/klines?symbol=BTCUSDT&interval=${interval}&limit=${Math.min(1000, limit)}`, // Spot proxy fallback
-        ...BINANCE_OFFICIAL_ENDPOINTS.map((e) => `${e}?symbol=${cleanSymbol}&interval=${interval}&limit=${Math.min(1000, limit)}`),
-      ]
-    : BINANCE_OFFICIAL_ENDPOINTS.map((e) => `${e}?symbol=${cleanSymbol}&interval=${interval}&limit=${Math.min(1000, limit)}`);
+  // IMPORTANT: every symbol is fetched from its own Binance endpoint, in this exact priority.
+  // We must NEVER synthesise or rescale another asset's candles (e.g. BTC spot prices re-anchored
+  // to a fixed "gold ~3920" constant). A fabricated series is indistinguishable from a real one
+  // downstream, so stops/take-profits fire on prices the exchange never printed and every live
+  // position is force-closed seconds after it opens. If the real symbol has no data, we throw and
+  // the caller skips that symbol instead of trading a hallucinated chart.
+  const endpointsToTry = BINANCE_OFFICIAL_ENDPOINTS.map(
+    (e) => `${e}?symbol=${cleanSymbol}&interval=${interval}&limit=${Math.min(1000, limit)}`
+  );
 
   for (const endpointUrl of endpointsToTry) {
     try {
@@ -259,8 +271,10 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
           // ignore
         }
         const err = new Error(`币安接口 HTTP ${resp.status}${errDetail}`);
-        if (endpointUrl.includes('fapi.binance.com') && errCode === -1121 && !['BTCUSDT', 'ETHUSDT'].includes(cleanSymbol)) {
-          throw Object.assign(err, { fatalInvalidSymbol: true });
+        if (errCode === -1121) {
+          // Symbol does not exist on this venue; keep trying the remaining venues, but remember it
+          // so the caller can mark the symbol as unavailable instead of retrying forever.
+          (err as any).invalidSymbol = true;
         }
         throw err;
       }
@@ -287,22 +301,8 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
         tradesCount: Number(item[8]),
       }));
 
-      // If it's a TradFi symbol using BTC spot proxy, rescale prices to match benchmark (XAU ~3920, NVDA ~165, CL ~87)
-      if (isTradFiSymbol && klines.length > 0) {
-        const basePrice = cleanSymbol === 'XAUUSDT' ? 3920 : cleanSymbol === 'NVDAUSDT' ? 165 : cleanSymbol === 'CLUSDT' ? 87.2 : 100;
-        const firstClose = klines[0].close || 1;
-        const scale = basePrice / firstClose;
-        klines = klines.map((k, idx) => {
-          // Add gentle realistic random walk for live simulation
-          const noise = (Math.sin(idx * 0.5 + startTime * 0.0001) * 0.0015);
-          const factor = scale * (1 + noise);
-          const open = Number((k.open * factor).toFixed(2));
-          const high = Number((k.high * factor).toFixed(2));
-          const low = Number((k.low * factor).toFixed(2));
-          const close = Number((k.close * factor).toFixed(2));
-          return { ...k, open, high: Math.max(open, high, close), low: Math.min(open, low, close), close };
-        });
-      }
+      // NOTE: no rescaling / no "gentle random walk" / no benchmark anchoring here.
+      // Prices below are exactly the prices Binance returned for `cleanSymbol`.
 
       const latencyMs = Date.now() - startTime;
       let highestPrice = -Infinity;
@@ -338,53 +338,18 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
       return result;
     } catch (err: any) {
       lastError = err;
-      if (err?.fatalInvalidSymbol) break;
       continue;
     }
   }
 
-  // Fallback generator for XAU, NVDA, CL if all external network fetches fail
-  if (isTradFiSymbol) {
-    const basePrice = cleanSymbol === 'XAUUSDT' ? 3920 : cleanSymbol === 'NVDAUSDT' ? 165 : cleanSymbol === 'CLUSDT' ? 87.2 : 100;
-    const nowTs = Date.now();
-    const intervalMs = interval === '5m' ? 300_000 : interval === '15m' ? 900_000 : 1800_000;
-    const klines: Kline[] = [];
-    let p = basePrice;
-    for (let i = limit; i >= 0; i--) {
-      const ts = nowTs - i * intervalMs;
-      const delta = (Math.sin(i * 0.3) * 0.003 + (Math.random() - 0.49) * 0.004) * p;
-      const open = p;
-      const close = p + delta;
-      const high = Math.max(open, close) + Math.abs(delta) * 0.5;
-      const low = Math.min(open, close) - Math.abs(delta) * 0.5;
-      p = close;
-      klines.push({ timestamp: ts, open: Number(open.toFixed(2)), high: Number(high.toFixed(2)), low: Number(low.toFixed(2)), close: Number(close.toFixed(2)), volume: 1500, quoteVolume: 150000, tradesCount: 120 });
-    }
-    const audit: DataSourceAudit = {
-      isRealData: true,
-      endpointUrl: 'synthetic_tradfi_feed',
-      symbol: cleanSymbol,
-      interval,
-      candleCount: klines.length,
-      latencyMs: 2,
-      fetchTime: Date.now(),
-      firstCandleIso: new Date(klines[0].timestamp).toISOString(),
-      lastCandleIso: new Date(klines[klines.length - 1].timestamp).toISOString(),
-      firstPrice: klines[0].open,
-      lastPrice: klines[klines.length - 1].close,
-      highestPrice: basePrice * 1.05,
-      lowestPrice: basePrice * 0.95,
-      totalTradesRecorded: 1000,
-      rawSample: [],
-    };
-    const result: BinanceFetchResult = { klines, audit };
-    klineCache.set(cacheKey, { timestamp: Date.now(), result });
-    return result;
-  }
-
-  throw new Error(
-    `无法从币安官方接口拉取真实数据: ${lastError?.message || '网络连接超时'}。请检查网络连接或交易对名称是否有效。`
+  // No synthetic / offline fallback: if Binance has no real candles for this symbol we surface
+  // the failure so the engine skips the symbol instead of trading a fabricated chart.
+  const finalError = new Error(
+    `无法从币安官方接口拉取 ${cleanSymbol} ${interval} 真实K线: ${lastError?.message || '网络连接超时'}。` +
+      ` 已跳过该币种，绝不使用本地模拟数据。`
   );
+  (finalError as any).invalidSymbol = Boolean((lastError as any)?.invalidSymbol);
+  throw finalError;
 }
 
 export interface MultiStrategyComparison {

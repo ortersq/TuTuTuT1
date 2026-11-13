@@ -87,7 +87,9 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
 // Protected Bot Status (auto-refreshes live Binance account & positions when API keys are set)
 app.get('/api/bot/status', requireAuth, async (req, res) => {
   if (botEngine.hasApiCredentials()) {
-    await botEngine.syncLiveAccountIfStale(4000);
+    // A short max-age keeps the UI live while preventing every browser poll from spending
+    // signed-request weight (the 5s engine loop already refreshes the account snapshot).
+    await botEngine.syncLiveAccountIfStale(12_000);
   }
   res.json(botEngine.getStatus());
 });
@@ -100,7 +102,7 @@ app.get('/api/binance/live-account', requireAuth, async (req, res) => {
       message: '尚未配置币安实盘 API Key，请在系统设置中输入后连接实盘账户',
     });
   }
-  await botEngine.syncLiveAccountIfStale(3000);
+  await botEngine.syncLiveAccountIfStale(6_000);
   const status = botEngine.getStatus();
   return res.json({
     mode: status.mode,
@@ -237,8 +239,17 @@ app.post('/api/bot/credentials', requireAuth, async (req, res) => {
 // Protected Emergency Close Position
 app.post('/api/bot/close-position', requireAuth, async (req, res) => {
   const { symbol } = req.body || {};
-  await botEngine.emergencyClosePosition('END_OF_DATA', symbol);
-  res.json({ success: true, message: '仓位已平仓', status: botEngine.getStatus() });
+  const result = await botEngine.emergencyClosePosition('END_OF_DATA', symbol);
+  res.json({
+    success: result.failed === 0,
+    closedCount: result.closed,
+    failedCount: result.failed,
+    message:
+      result.failed > 0
+        ? `已平仓 ${result.closed} 笔，${result.failed} 笔失败（交易所未确认成交，本地记录已保留并将自动重试）`
+        : `仓位已平仓 (${result.closed} 笔)`,
+    status: botEngine.getStatus(),
+  });
 });
 
 // Protected Portfolio One-Click Close All Positions (losing first, cancels residual exchange SL/TP orders, sets anti-reopen cooldown)
@@ -287,12 +298,13 @@ app.post('/api/bot/fix-anomaly', requireAuth, async (req, res) => {
   });
 });
 
-// Proxy Binance Klines
-app.get('/api/binance/klines', async (req, res) => {
+// Proxy Binance Klines (authenticated: this endpoint costs shared IP request weight)
+app.get('/api/binance/klines', requireAuth, async (req, res) => {
   try {
     const symbol = (req.query.symbol as string) || 'BTCUSDT';
     const interval = (req.query.interval as string) || '1h';
-    const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 300;
+    const rawLimit = req.query.limit ? parseInt(req.query.limit as string, 10) : 300;
+    const limit = Number.isFinite(rawLimit) ? Math.min(1000, Math.max(30, rawLimit)) : 300;
 
     const data = await fetchBinanceKlines({ symbol, interval, limit });
     res.json(data);

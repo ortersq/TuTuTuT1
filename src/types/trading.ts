@@ -531,6 +531,14 @@ export interface LiveAccountSyncInfo {
   positionInitialMargin?: number;
   openPositionsCount?: number;
   equitySource?: 'BINANCE_LIVE_API' | 'PAPER_SIMULATION';
+  /** True only when the last /fapi/v2/positionRisk snapshot was authoritative. */
+  positionsOk?: boolean;
+  /** Timestamp of the last authoritative position snapshot (may be older than syncedAt). */
+  positionsSyncedAt?: number;
+  /** Binance-reported IP request weight used in the current minute (X-MBX-USED-WEIGHT-1M). */
+  usedWeight1m?: number;
+  /** Epoch ms until which all exchange requests are paused after a 429/418/-1003. */
+  rateLimitedUntil?: number;
 }
 
 export interface PortfolioBasketConfig {

@@ -64,12 +64,15 @@ import {
 } from '../utils/riskAndExecution';
 import {
   buildLiveSyncInfo,
+  mergeClosedTrades,
   parseBinanceAccountResponse,
   parseBinanceOpenPositions,
   parseBinanceRealClosedTrades,
   reconstructLiveEquityHistoryFromIncome,
+  type ParsedBinanceAccount,
 } from '../utils/binanceSync';
 import { DEFAULT_STRATEGY_PARAMS, generateAllSignals } from '../utils/strategies';
+import { BinanceApiError, BinanceFuturesRest } from './binanceRest';
 
 dotenv.config();
 
@@ -229,6 +232,31 @@ class TradingEngine {
   private apiKey: string = process.env.BINANCE_API_KEY?.trim() || '';
   private apiSecret: string = process.env.BINANCE_API_SECRET?.trim() || '';
 
+  /**
+   * Single gateway for every signed Binance call. It owns weight budgeting, 429/418 back-off,
+   * time-offset correction and hard timeouts, and it ALWAYS throws on failure instead of
+   * returning an empty array (the root cause of the "positions vanished" false closes).
+   */
+  private readonly binanceRest: BinanceFuturesRest = new BinanceFuturesRest(
+    () => this.getFuturesBaseUrl(),
+    () => this.apiKey,
+    () => this.apiSecret,
+    (level, message) => this.addLog(level, 'API', message)
+  );
+
+  private positionsSyncedAt: number = 0;
+  private lastPositionSignature: string | null = null;
+  private lastHistorySyncAt: number = 0;
+  private lastProtectiveRepairAt: number = 0;
+  private lastTrailingExchangeSyncAt: number = 0;
+  /** Per-symbol cooldown so correlation hedging cannot chop the same position every 10s. */
+  private lastCorrelationHedgeAt: Map<string, number> = new Map();
+  /** Back-off after repeated failed close attempts so a rejected order cannot spam every cycle. */
+  private closeRetryAfter: Map<string, number> = new Map();
+  private closeFailureCount: Map<string, number> = new Map();
+  /** Last time we attached exchange protection for `symbol:side` (prevents duplicate SL/TP storms). */
+  private protectionPlacedAt: Map<string, number> = new Map();
+
   private balance: number = 10000;
   private equity: number = 10000;
   private peakEquity: number = 10000;
@@ -254,6 +282,7 @@ class TradingEngine {
   private isRefreshingMarket: boolean = false;
   private lastMarketPreviewTime: number = 0;
   private syncInFlight: Promise<LiveAccountSyncInfo | null> | null = null;
+  private syncToken: number = 0;
   private lastLiveSamplePushTime: number = 0;
   private latestSymbolKlinesMap: Map<string, Kline[]> = new Map();
   private marketTickers: Map<string, MarketTickerSnapshot> = new Map();
@@ -341,9 +370,15 @@ class TradingEngine {
           : '🔵 模拟观察模式 (无 API Key，只自动模拟开平仓并记录损益)'
       }`
     );
+    // Never start background polling just because the module was imported: unit tests, CLI
+    // helpers and one-off scripts must not fire live Binance requests (it kept the test process
+    // alive for ~40s and spent real request weight).
     const isTestRunner =
       Boolean(process.env.NODE_TEST_CONTEXT) ||
-      process.argv.some((arg) => arg === '--test' || arg.endsWith('.test.ts'));
+      process.env.DSH_NO_BACKGROUND_POLLING === '1' ||
+      process.argv.some(
+        (arg) => arg === '--test' || /(^|[\\/])[^\\/]+\.test\.(ts|js|mjs|cjs)$/.test(arg)
+      );
     if (!isTestRunner) {
       if (hasKeys) {
         this.ensureLiveSyncLoop();
@@ -426,6 +461,7 @@ class TradingEngine {
 
       await Promise.allSettled(
         this.monitoredSymbols.map(async (symbol) => {
+          if (this.hasApiCredentials() && this.getSymbolRules(symbol).available === false) return;
           for (const interval of this.monitoredTimeframes) {
             try {
               const fetchResult = await fetchBinanceKlines({
@@ -833,6 +869,10 @@ class TradingEngine {
   }
 
   private getFuturesBaseUrl(): string {
+    // Explicit override first: lets users point at a proxy / mirror, and lets integration tests
+    // run against a stub instead of the production matching engine.
+    const override = process.env.BINANCE_FUTURES_BASE_URL?.trim();
+    if (override) return override.replace(/\/+$/, '');
     return process.env.BINANCE_USE_TESTNET === 'true'
       ? 'https://testnet.binancefuture.com'
       : 'https://fapi.binance.com';
@@ -890,6 +930,9 @@ class TradingEngine {
 
   public async syncLiveAccountIfStale(maxAgeMs: number = 4000): Promise<LiveAccountSyncInfo | null> {
     if (!this.hasApiCredentials()) return null;
+    // While Binance has us in a 429/418 cool-down, serve the cached snapshot instead of
+    // hammering the API from every HTTP poll (that is what escalated bans to multiple minutes).
+    if (this.binanceRest.isRateLimited()) return this.liveSyncInfo;
     const syncedAt = this.liveSyncInfo?.syncedAt ?? 0;
     if (Date.now() - syncedAt < maxAgeMs && this.liveSyncInfo) {
       return this.liveSyncInfo;
@@ -899,13 +942,22 @@ class TradingEngine {
 
   public async syncLiveAccountNow(fetchHistory: boolean = true): Promise<LiveAccountSyncInfo | null> {
     if (!this.hasApiCredentials()) return null;
-    if (this.syncInFlight) return this.syncInFlight;
-    this.syncInFlight = this.syncBinanceAccountAndPositions(fetchHistory)
-      .then(() => this.liveSyncInfo)
-      .finally(() => {
-        this.syncInFlight = null;
-      });
-    return this.syncInFlight;
+    if (this.syncInFlight) {
+      // Join the in-flight request instead of issuing a duplicate one. If the caller needed the
+      // trade history and the in-flight sync will not provide it, run one more pass afterwards.
+      const startedAt = Date.now();
+      await this.syncInFlight.catch(() => null);
+      if (!fetchHistory) return this.liveSyncInfo;
+      if (this.lastHistorySyncAt >= startedAt - 1_000) return this.liveSyncInfo;
+    }
+    const token = ++this.syncToken;
+    const clear = () => {
+      if (this.syncToken === token) this.syncInFlight = null;
+    };
+    const promise = this.syncBinanceAccountAndPositions(fetchHistory).then(() => this.liveSyncInfo);
+    this.syncInFlight = promise;
+    promise.then(clear, clear);
+    return promise;
   }
 
   private recordLiveEquitySample(
@@ -941,345 +993,468 @@ class TradingEngine {
     }
   }
 
+  /**
+   * Mark a failed sync WITHOUT touching local positions.
+   * A failed request is never evidence that a position was closed — that assumption is what
+   * produced the `[交易所触发平仓同步]` storm and the fabricated −96 USDT PnL in the diagnostics.
+   */
+  private markSyncFailure(err: any, scope: string): void {
+    const message = err?.message || String(err);
+    const now = Date.now();
+    const stats = this.binanceRest.getStats();
+    const prev = this.liveSyncInfo;
+    this.liveSyncInfo = {
+      syncedAt: prev?.syncedAt ?? 0,
+      syncOk: false,
+      errorMessage: `${scope}同步失败: ${message}`,
+      walletBalance: prev?.walletBalance ?? this.balance,
+      availableBalance: prev?.availableBalance ?? this.balance,
+      marginBalance: prev?.marginBalance ?? this.equity,
+      unrealizedProfit: prev?.unrealizedProfit ?? 0,
+      positionInitialMargin: prev?.positionInitialMargin ?? 0,
+      openPositionsCount: this.activePositions.filter((p) => !p.isPaper).length,
+      equitySource: 'BINANCE_LIVE_API',
+      positionsOk: prev?.positionsOk ?? false,
+      positionsSyncedAt: this.positionsSyncedAt,
+      usedWeight1m: stats.usedWeight1m,
+      rateLimitedUntil: stats.rateLimitedUntil,
+    };
+    if (now - this.lastSyncErrorLogTime > 60_000) {
+      this.lastSyncErrorLogTime = now;
+      const held = this.activePositions.filter((p) => !p.isPaper).length;
+      this.addLog(
+        'error',
+        'API',
+        `❌ [币安实盘同步失败] ${message}｜本地实盘持仓 ${held} 笔已完整保留，未按"空持仓"做任何平仓判定`
+      );
+    }
+  }
+
   private async syncBinanceAccountAndPositions(fetchHistory: boolean = false): Promise<void> {
     if (!this.hasApiCredentials()) return;
-    const baseUrl = this.getFuturesBaseUrl();
+    const now = Date.now();
 
+    // ---------------------------------------------------------------- 1. account & equity
+    let acctData: any;
     try {
-      const ts1 = Date.now();
-      const qs1 = `timestamp=${ts1}&recvWindow=10000`;
-      const sig1 = this.signQuery(qs1);
-      const acctRes = await fetch(`${baseUrl}/fapi/v2/account?${qs1}&signature=${sig1}`, {
-        headers: { 'X-MBX-APIKEY': this.apiKey },
-      });
+      acctData = await this.binanceRest.account();
+    } catch (err) {
+      this.markSyncFailure(err, '账户与净值');
+      this.notifyListeners();
+      return;
+    }
 
-      const acctData: any = await acctRes.json().catch(() => ({}));
-      if (!acctRes.ok) {
-        const errMsg = acctData?.msg
-          ? `[${acctData.code ?? acctRes.status}] ${acctData.msg}`
-          : `HTTP ${acctRes.status}`;
-        this.liveSyncInfo = {
-          syncedAt: Date.now(),
-          syncOk: false,
-          errorMessage: `币安实盘账户同步失败: ${errMsg}`,
-          walletBalance: this.balance,
-          availableBalance: this.balance,
-          marginBalance: this.equity,
-          unrealizedProfit: 0,
-          equitySource: 'BINANCE_LIVE_API',
-        };
-        if (Date.now() - this.lastSyncErrorLogTime > 60_000) {
-          this.lastSyncErrorLogTime = Date.now();
-          this.addLog(
-            'error',
-            'API',
-            `❌ [币安实盘同步失败] ${errMsg} (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)`
-          );
-        }
-        return;
-      }
+    const parsedAcct = parseBinanceAccountResponse(acctData);
+    this.balance = parsedAcct.availableBalance;
+    this.equity = parsedAcct.marginBalance;
+    if (this.equity > this.peakEquity) this.peakEquity = this.equity;
+    const wasFirstOk = !this.liveSyncInfo?.syncOk;
 
-      const parsedAcct = parseBinanceAccountResponse(acctData);
-
-      // Sync real open positions & open conditional orders (standard + algo) directly from Binance Futures
-      const ts2 = Date.now();
-      const qs2 = `timestamp=${ts2}&recvWindow=10000`;
-      const sig2 = this.signQuery(qs2);
-      const [posRes, openOrdersRes, algoOrdersRes] = await Promise.allSettled([
-        fetch(`${baseUrl}/fapi/v2/positionRisk?${qs2}&signature=${sig2}`, {
-          headers: { 'X-MBX-APIKEY': this.apiKey },
-        }),
-        fetch(`${baseUrl}/fapi/v1/openOrders?${qs2}&signature=${sig2}`, {
-          headers: { 'X-MBX-APIKEY': this.apiKey },
-        }),
-        fetch(`${baseUrl}/fapi/v1/openAlgoOrders?${qs2}&signature=${sig2}`, {
-          headers: { 'X-MBX-APIKEY': this.apiKey },
-        }),
-      ]);
-
-      const posList: any[] =
-        posRes.status === 'fulfilled' && posRes.value.ok
-          ? await posRes.value.json().catch(() => [])
-          : [];
-      const openOrders: any[] =
-        openOrdersRes.status === 'fulfilled' && openOrdersRes.value.ok
-          ? await openOrdersRes.value.json().catch(() => [])
-          : [];
-      const openAlgoOrders: any[] =
-        algoOrdersRes.status === 'fulfilled' && algoOrdersRes.value.ok
-          ? await algoOrdersRes.value.json().catch(() => [])
-          : [];
-
-      // Periodically detect Binance position mode (One-Way vs Hedge / dualSidePosition)
-      if (Date.now() - this.lastHedgeModeCheck > 60_000) {
-        this.lastHedgeModeCheck = Date.now();
-        try {
-          const dTs = Date.now();
-          const dQs = `timestamp=${dTs}&recvWindow=10000`;
-          const dSig = this.signQuery(dQs);
-          const dualRes = await fetch(`${baseUrl}/fapi/v1/positionSide/dual?${dQs}&signature=${dSig}`, {
-            headers: { 'X-MBX-APIKEY': this.apiKey },
-          });
-          if (dualRes.ok) {
-            const dualData: any = await dualRes.json().catch(() => ({}));
-            if (typeof dualData?.dualSidePosition === 'boolean') {
-              this.isHedgeMode = dualData.dualSidePosition;
-            }
-          }
-        } catch {
-          // ignore
-        }
-      }
-
-      const prevLiveCount = this.activePositions.filter((p) => !p.isPaper).length;
-      const realOpenCount = Array.isArray(posList)
-        ? posList.filter((p) => Math.abs(parseFloat(p?.positionAmt || '0')) > 0).length
-        : prevLiveCount;
-      const shouldSyncHistory =
-        fetchHistory || !this.hasSyncedLiveHistory || realOpenCount !== prevLiveCount;
-
-      this.balance = parsedAcct.availableBalance;
-      this.equity = parsedAcct.marginBalance;
-      if (this.equity > this.peakEquity) this.peakEquity = this.equity;
-
-      const wasFirstOk = !this.liveSyncInfo?.syncOk;
-      this.liveSyncInfo = buildLiveSyncInfo(parsedAcct, realOpenCount, Date.now());
-
-      if (wasFirstOk) {
-        this.addLog(
-          'success',
-          'API',
-          `✅ [币安实盘账户已连接] 持仓模式: ${this.isHedgeMode ? '双向持仓 (Hedge)' : '单向持仓 (One-Way)'} | 钱包余额: $${parsedAcct.walletBalance.toFixed(2)} | 可用保证金: $${parsedAcct.availableBalance.toFixed(
-            2
-          )} | 实时净值: $${this.equity.toFixed(2)} | 浮动盈亏: ${parsedAcct.unrealizedProfit >= 0 ? '+' : ''}$${parsedAcct.unrealizedProfit.toFixed(2)} USDT`
-        );
-      }
-
-      if (Array.isArray(posList)) {
-        const realOpenPositions = posList.filter((p) => Math.abs(parseFloat(p.positionAmt || '0')) > 0);
-
-        // Detect positions that existed locally in LIVE mode but are now closed on Binance (TP/SL filled on exchange!)
-        for (const existing of this.activePositions) {
-          if (existing.isPaper) continue;
-          const stillOpen = realOpenPositions.find((p) => {
-            const amt = parseFloat(p.positionAmt || '0');
-            const pSide = amt > 0 ? 'LONG' : 'SHORT';
-            return p.symbol === existing.symbol && pSide === existing.side;
-          });
-          if (!stillOpen) {
-            await this.cancelAllBinanceOrders(existing.symbol);
-            const approxExitPrice = existing.currentPrice || existing.entryPrice;
-            const gross =
-              existing.side === 'LONG'
-                ? (approxExitPrice - existing.entryPrice) * existing.quantity
-                : (existing.entryPrice - approxExitPrice) * existing.quantity;
-            const closedRec: BotTradeRecord = {
-              id: existing.id,
-              symbol: existing.symbol,
-              interval: existing.interval,
-              side: existing.side,
-              patternType: existing.patternType,
-              patternName: existing.patternName,
-              entryTime: existing.entryTime,
-              exitTime: Date.now(),
-              entryPrice: existing.entryPrice,
-              exitPrice: approxExitPrice,
-              quantity: existing.quantity,
-              leverage: existing.leverage,
-              marginUsed: existing.marginUsed,
-              netPnl: Number(gross.toFixed(2)),
-              pnlPercent: existing.marginUsed > 0 ? Number(((gross / existing.marginUsed) * 100).toFixed(2)) : 0,
-              peakPnlUsdt: existing.peakPnlUsdt,
-              reversionUsdt: Math.max(0, (existing.peakPnlUsdt || 0) - gross),
-              volatilityLevel: 'NORMAL',
-              exitReason: gross >= 0 ? 'TAKE_PROFIT' : 'STOP_LOSS',
-              strategyUsed: existing.strategyUsed,
-              isPaper: false,
-            };
-            this.closedTrades.push(closedRec);
-            this.updatePatternLearning(closedRec);
-            this.addLog(
-              gross >= 0 ? 'success' : 'warn',
-              'ORDER',
-              `✔ [交易所触发平仓同步] ${existing.symbol} (${existing.side}) 已在币安实盘完成平仓，损益约 ${gross >= 0 ? '+' : ''}$${gross.toFixed(2)} USDT，正在拉取真实交割流水`,
-              existing.symbol
-            );
-          }
-        }
-
-        const parsedPositions = parseBinanceOpenPositions(
-          posList,
-          openOrders,
-          openAlgoOrders,
-          this.activePositions,
-          this.leverage,
-          Date.now()
-        );
-
-        // Auto-attach exchange-side SL/TP if an open live position lacks conditional protection on Binance
-        for (const livePos of parsedPositions) {
-          if (!livePos.stopLossOrderId && livePos.entryPrice > 0) {
-            const safeSl =
-              livePos.stopLossPrice ||
-              (livePos.side === 'LONG' ? livePos.entryPrice * 0.985 : livePos.entryPrice * 1.015);
-            const slPlaced = await this.placeBinanceConditionalOrder(
-              livePos.symbol,
-              livePos.side === 'LONG' ? 'SELL' : 'BUY',
-              'STOP_MARKET',
-              safeSl,
-              livePos.quantity,
-              livePos.side
-            );
-            if (slPlaced?.orderId) {
-              livePos.stopLossPrice = safeSl;
-              livePos.stopLossOrderId = slPlaced.orderId;
-              this.addLog(
-                'info',
-                'API',
-                `🛡️ [实盘持仓补挂交易所止损] 为 ${livePos.symbol} (${livePos.side}) 自动补挂 STOP_MARKET @ $${safeSl.toFixed(2)} (#${slPlaced.orderId})`,
-                livePos.symbol
-              );
-            }
-          }
-
-          if (!livePos.takeProfitOrderId && livePos.entryPrice > 0) {
-            const safeTp =
-              livePos.takeProfitPrice ||
-              (livePos.side === 'LONG' ? livePos.entryPrice * 1.033 : livePos.entryPrice * 0.967);
-            const tpPlaced = await this.placeBinanceConditionalOrder(
-              livePos.symbol,
-              livePos.side === 'LONG' ? 'SELL' : 'BUY',
-              'TAKE_PROFIT_MARKET',
-              safeTp,
-              livePos.quantity,
-              livePos.side
-            );
-            if (tpPlaced?.orderId) {
-              livePos.takeProfitPrice = safeTp;
-              livePos.takeProfitOrderId = tpPlaced.orderId;
-              this.addLog(
-                'info',
-                'API',
-                `🎯 [实盘持仓补挂交易所止盈] 为 ${livePos.symbol} (${livePos.side}) 自动补挂 TAKE_PROFIT_MARKET @ $${safeTp.toFixed(2)} (#${tpPlaced.orderId})`,
-                livePos.symbol
-              );
-            }
-          }
-        }
-
-        this.activePositions = parsedPositions;
-      }
-
-      // Sync real historical /fapi/v1/income + /fapi/v1/userTrades so both equityHistory and closedTrades come strictly from Binance
-      if (shouldSyncHistory) {
-        this.hasSyncedLiveHistory = true;
-        try {
-          const ts3 = Date.now();
-          const qs3 = `limit=80&timestamp=${ts3}&recvWindow=10000`;
-          const sig3 = this.signQuery(qs3);
-          const incRes = await fetch(`${baseUrl}/fapi/v1/income?${qs3}&signature=${sig3}`, {
-            headers: { 'X-MBX-APIKEY': this.apiKey },
-          });
-          const incomes: any[] = incRes.ok ? await incRes.json().catch(() => []) : [];
-
-          const distinctSyms = Array.from(
-            new Set([
-              ...this.activePositions.map((p) => p.symbol),
-              ...(Array.isArray(incomes) ? incomes.map((i) => i?.symbol).filter(Boolean) : []),
-            ])
-          ).slice(0, 6);
-
-          const tradeFetches = await Promise.allSettled(
-            distinctSyms.map((sym) => {
-              const tTs = Date.now();
-              const tQs = `symbol=${sym}&limit=30&timestamp=${tTs}&recvWindow=10000`;
-              const tSig = this.signQuery(tQs);
-              return fetch(`${baseUrl}/fapi/v1/userTrades?${tQs}&signature=${tSig}`, {
-                headers: { 'X-MBX-APIKEY': this.apiKey },
-              }).then((r) => (r.ok ? r.json() : []));
-            })
-          );
-
-          const allUserTrades: any[] = [];
-          for (const res of tradeFetches) {
-            if (res.status === 'fulfilled' && Array.isArray(res.value)) {
-              allUserTrades.push(...res.value);
-            }
-          }
-
-          const reconstructedHistory = reconstructLiveEquityHistoryFromIncome(
-            incomes,
-            parsedAcct,
-            this.activePositions.length,
-            Date.now()
-          );
-          if (reconstructedHistory.length > 0) {
-            // Merge historical points ahead of any already captured live pulse ticks
-            const cutoff = reconstructedHistory[reconstructedHistory.length - 1].timestamp;
-            const liveTail = this.equityHistory.filter((pt) => pt.timestamp > cutoff);
-            this.equityHistory = [...reconstructedHistory, ...liveTail].slice(-360);
-            for (const pt of this.equityHistory) {
-              if (pt.equity > this.peakEquity) this.peakEquity = pt.equity;
-            }
-            this.lastLiveSamplePushTime = Date.now();
-          }
-
-          const realClosed = parseBinanceRealClosedTrades(incomes, allUserTrades, this.leverage);
-          if (realClosed.length > 0) {
-            this.closedTrades = realClosed;
-            this.addLog(
-              'info',
-              'API',
-              `📜 已从币安合约实时同步 ${realClosed.length} 笔真实实盘成交与资金流水历史 (${reconstructedHistory.length} 个历史净值节点)`
-            );
-          }
-        } catch (histErr: any) {
-          this.addLog('warn', 'API', `⚠️ 币安历史交割单辅助同步受限: ${histErr?.message || '请求失败'}`);
-        }
-      }
-
-      // Always append real-time 5s live pulse snapshot directly from Binance values
-      this.recordLiveEquitySample(
-        this.equity,
-        this.balance,
-        parsedAcct.unrealizedProfit,
-        this.activePositions.length
-      );
+    // ---------------------------------------------------------------- 2. positions snapshot
+    // This snapshot is MANDATORY. If it fails we abort the whole sync: equity stays usable,
+    // but no close detection, no order cancelling and no activePositions mutation happens.
+    let posList: any[] | null = null;
+    let positionsError = '';
+    try {
+      const raw = await this.binanceRest.positionRisk();
+      if (Array.isArray(raw)) posList = raw;
+      else positionsError = 'positionRisk 返回格式异常';
     } catch (err: any) {
+      positionsError = err?.message || String(err);
+    }
+
+    if (!posList) {
+      const stats = this.binanceRest.getStats();
+      const prev = this.liveSyncInfo;
       this.liveSyncInfo = {
-        syncedAt: Date.now(),
+        syncedAt: now,
         syncOk: false,
-        errorMessage: `同步币安实盘账户网络异常: ${err.message}`,
-        walletBalance: this.balance,
-        availableBalance: this.balance,
-        marginBalance: this.equity,
-        unrealizedProfit: 0,
+        errorMessage: `持仓快照获取失败: ${positionsError}`,
+        walletBalance: parsedAcct.walletBalance,
+        availableBalance: parsedAcct.availableBalance,
+        marginBalance: parsedAcct.marginBalance,
+        unrealizedProfit: parsedAcct.unrealizedProfit,
+        positionInitialMargin: parsedAcct.positionInitialMargin,
+        openPositionsCount: this.activePositions.filter((p) => !p.isPaper).length,
         equitySource: 'BINANCE_LIVE_API',
+        positionsOk: false,
+        positionsSyncedAt: prev?.positionsSyncedAt ?? this.positionsSyncedAt,
+        usedWeight1m: stats.usedWeight1m,
+        rateLimitedUntil: stats.rateLimitedUntil,
       };
-      if (Date.now() - this.lastSyncErrorLogTime > 60_000) {
-        this.lastSyncErrorLogTime = Date.now();
-        this.addLog('error', 'API', `❌ 同步币安合约实盘数据异常: ${err.message}`);
+      if (now - this.lastSyncErrorLogTime > 60_000) {
+        this.lastSyncErrorLogTime = now;
+        const held = this.activePositions.filter((p) => !p.isPaper).length;
+        this.addLog(
+          'error',
+          'API',
+          `❌ [币安持仓同步失败] ${positionsError}｜本地 ${held} 笔实盘持仓保持不变，拒绝把"请求失败"当成"已被交易所平仓"`
+        );
+      }
+      this.notifyListeners();
+      return;
+    }
+
+    const realOpenPositions = posList.filter((p) => Math.abs(parseFloat(p?.positionAmt || '0')) > 0);
+    const posSignature = realOpenPositions
+      .map((p) => {
+        const amt = parseFloat(p.positionAmt || '0');
+        return `${p.symbol}:${amt > 0 ? 'L' : 'S'}:${Math.abs(amt).toFixed(8)}`;
+      })
+      .sort()
+      .join('|');
+    const positionSetChanged =
+      this.lastPositionSignature !== null && this.lastPositionSignature !== posSignature;
+    this.lastPositionSignature = posSignature;
+    this.positionsSyncedAt = now;
+
+    const stats = this.binanceRest.getStats();
+    this.liveSyncInfo = {
+      ...buildLiveSyncInfo(parsedAcct, realOpenPositions.length, now),
+      positionsOk: true,
+      positionsSyncedAt: now,
+      usedWeight1m: stats.usedWeight1m,
+      rateLimitedUntil: stats.rateLimitedUntil,
+    };
+
+    if (wasFirstOk) {
+      this.addLog(
+        'success',
+        'API',
+        `✅ [币安实盘账户已连接] 持仓模式: ${this.isHedgeMode ? '双向持仓 (Hedge)' : '单向持仓 (One-Way)'} | 钱包余额: $${parsedAcct.walletBalance.toFixed(
+          2
+        )} | 可用保证金: $${parsedAcct.availableBalance.toFixed(
+          2
+        )} | 实时净值: $${this.equity.toFixed(2)} | 浮动盈亏: ${parsedAcct.unrealizedProfit >= 0 ? '+' : ''}$${parsedAcct.unrealizedProfit.toFixed(2)} USDT`
+      );
+    }
+
+    // ---------------------------------------------------------------- 3. genuinely closed legs
+    // Only positions that are absent from an AUTHORITATIVE snapshot reach this branch, and a
+    // close is only booked when the real fills can be reconciled from /fapi/v1/userTrades.
+    const survivors: ActivePosition[] = [];
+    for (const existing of this.activePositions) {
+      if (existing.isPaper) {
+        survivors.push(existing);
+        continue;
+      }
+      const stillOpen = realOpenPositions.some((p) => {
+        const amt = parseFloat(p.positionAmt || '0');
+        return p.symbol === existing.symbol && (amt > 0 ? 'LONG' : 'SHORT') === existing.side;
+      });
+      if (stillOpen) {
+        survivors.push(existing);
+        continue;
+      }
+      await this.handleExchangeSideClose(existing);
+    }
+    this.activePositions = survivors;
+
+    // ---------------------------------------------------------------- 4. protective orders
+    // Queried per held symbol (weight 1) instead of one global call (weight 40).
+    const symbolsHeld = Array.from(new Set(realOpenPositions.map((p) => String(p?.symbol))));
+    const ordersBySymbol = new Map<string, any[]>();
+    let ordersKnown = true;
+    for (const sym of symbolsHeld) {
+      try {
+        const normal = await this.binanceRest.openOrders(sym);
+        const algo = await this.binanceRest.openAlgoOrders(sym);
+        ordersBySymbol.set(sym, [
+          ...(Array.isArray(normal) ? normal : []),
+          ...(Array.isArray(algo) ? algo : []),
+        ]);
+      } catch (err: any) {
+        ordersKnown = false;
+        ordersBySymbol.set(sym, []);
+        if (now - this.lastSyncErrorLogTime > 60_000) {
+          this.lastSyncErrorLogTime = now;
+          this.addLog(
+            'warn',
+            'API',
+            `⚠️ [挂单状态未知] ${sym} 条件单查询失败 (${err?.message || err})，本次跳过补挂以免重复下单`
+          );
+        }
       }
     }
+
+    const parsedPositions = parseBinanceOpenPositions(
+      posList,
+      [],
+      [],
+      this.activePositions,
+      this.leverage,
+      now,
+      {
+        ordersBySymbol,
+        ordersKnown,
+        // Only treat "no stop found" as authoritative when we could see both order books.
+        ordersAuthoritative: ordersKnown && this.binanceRest.getStats().algoOrdersSupported !== false,
+      }
+    );
+
+    if (ordersKnown) {
+      await this.repairProtectiveOrders(parsedPositions);
+    }
+    this.activePositions = parsedPositions;
+
+    // ---------------------------------------------------------------- 5. hedge mode (1/min)
+    if (now - this.lastHedgeModeCheck > 60_000 && this.binanceRest.canAfford(30)) {
+      this.lastHedgeModeCheck = now;
+      try {
+        const dualData: any = await this.binanceRest.positionMode();
+        if (typeof dualData?.dualSidePosition === 'boolean') {
+          this.isHedgeMode = dualData.dualSidePosition;
+        }
+      } catch {
+        // non fatal: keep the previously detected mode
+      }
+    }
+
+    // ---------------------------------------------------------------- 6. trade history
+    const historyDue = fetchHistory || !this.hasSyncedLiveHistory || positionSetChanged;
+    const historyAllowed = fetchHistory || now - this.lastHistorySyncAt >= 60_000;
+    if (historyDue && historyAllowed && this.binanceRest.canAfford(75)) {
+      await this.syncClosedTradeHistory(parsedAcct, now);
+    }
+
+    this.recordLiveEquitySample(
+      this.equity,
+      this.balance,
+      parsedAcct.unrealizedProfit,
+      this.activePositions.length
+    );
     this.notifyListeners();
+  }
+
+  /**
+   * Reconcile a position that really disappeared from the exchange.
+   * Books PnL ONLY from real fills; a missing fill means we stop tracking the position without
+   * inventing a result (the old code used `markPrice - entryPrice` and called it realised PnL).
+   */
+  private async handleExchangeSideClose(existing: ActivePosition): Promise<void> {
+    // Position is flat: its leftover conditional orders are stale and could open a reverse
+    // position later, so they must be removed.
+    await this.cancelAllBinanceOrders(existing.symbol, true).catch(() => {});
+
+    const resolved = await this.tryResolveClosedFill(existing);
+    if (!resolved) {
+      this.addLog(
+        'warn',
+        'ORDER',
+        `⚠️ [交易所侧平仓] ${existing.symbol} (${existing.side}) 在币安已无持仓，但未核对到对应交割流水，已停止跟踪该笔仓位（不写入盈亏，避免污染统计与自学习）`,
+        existing.symbol
+      );
+      return;
+    }
+
+    this.closedTrades.push(resolved);
+    this.closedTrades = this.closedTrades.slice(-200);
+    this.updatePatternLearning(resolved);
+    this.addLog(
+      resolved.netPnl >= 0 ? 'success' : 'warn',
+      'ORDER',
+      `✔ [交易所触发平仓同步] ${existing.symbol} (${existing.side}) 已在币安实盘完成平仓，真实交割损益 ${
+        resolved.netPnl >= 0 ? '+' : ''
+      }$${resolved.netPnl.toFixed(2)} USDT（成交均价 $${resolved.exitPrice}，数量 ${resolved.quantity}）`,
+      existing.symbol
+    );
+  }
+
+  private inferExitReason(pos: ActivePosition, exitPrice: number): ExitReason {
+    if (pos.stopLossPrice && pos.stopLossPrice > 0) {
+      const hitSl =
+        pos.side === 'LONG'
+          ? exitPrice <= pos.stopLossPrice * 1.003
+          : exitPrice >= pos.stopLossPrice * 0.997;
+      if (hitSl) return 'STOP_LOSS';
+    }
+    if (pos.takeProfitPrice && pos.takeProfitPrice > 0) {
+      const hitTp =
+        pos.side === 'LONG'
+          ? exitPrice >= pos.takeProfitPrice * 0.997
+          : exitPrice <= pos.takeProfitPrice * 1.003;
+      if (hitTp) return 'TAKE_PROFIT';
+    }
+    const profitable =
+      pos.side === 'LONG' ? exitPrice > pos.entryPrice : exitPrice < pos.entryPrice;
+    return profitable ? 'TAKE_PROFIT' : 'STOP_LOSS';
+  }
+
+  /**
+   * Build the closed-trade record from real exchange fills (preferred) or from a real execution
+   * price returned by our own market-close order. Returns null when neither is available.
+   */
+  private async tryResolveClosedFill(
+    pos: ActivePosition,
+    fallbackExitPrice?: number,
+    fallbackReason?: ExitReason
+  ): Promise<BotTradeRecord | null> {
+    const closingSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+    let fills: any[] = [];
+    try {
+      const trades = await this.binanceRest.userTrades(pos.symbol, 50);
+      fills = (Array.isArray(trades) ? trades : [])
+        .filter((t) => {
+          const tTime = Number(t?.time) || 0;
+          return (
+            tTime >= pos.entryTime - 5_000 &&
+            String(t?.side || '').toUpperCase() === closingSide &&
+            parseFloat(t?.qty || '0') > 0
+          );
+        })
+        .sort((a, b) => (Number(a.time) || 0) - (Number(b.time) || 0));
+    } catch {
+      fills = [];
+    }
+
+    const totalQty = fills.reduce((sum, f) => sum + (parseFloat(f.qty || '0') || 0), 0);
+    const qtyCovered = totalQty > 0 && (pos.quantity <= 0 || totalQty >= pos.quantity * 0.9);
+
+    if (qtyCovered) {
+      const quoteQty = fills.reduce((s, f) => s + (parseFloat(f.quoteQty || '0') || 0), 0);
+      const realized = fills.reduce((s, f) => s + (parseFloat(f.realizedPnl || '0') || 0), 0);
+      const commission = fills.reduce(
+        (s, f) =>
+          s + (String(f.commissionAsset || '').toUpperCase() === 'USDT' ? parseFloat(f.commission || '0') || 0 : 0),
+        0
+      );
+      const avgExit = totalQty > 0 ? quoteQty / totalQty : 0;
+      const exitTime = Math.max(...fills.map((f) => Number(f.time) || 0)) || Date.now();
+      const lastOrderId = String(fills[fills.length - 1]?.orderId ?? exitTime);
+      const netPnl = realized - commission;
+      const marginUsed =
+        pos.marginUsed > 0
+          ? pos.marginUsed
+          : quoteQty > 0
+          ? quoteQty / Math.max(1, pos.leverage)
+          : Math.abs(netPnl);
+
+      return {
+        id: `binance_fill_${pos.symbol}_${lastOrderId}`,
+        symbol: pos.symbol,
+        interval: pos.interval,
+        side: pos.side,
+        patternType: pos.patternType,
+        patternName: pos.patternName,
+        entryTime: pos.entryTime,
+        exitTime,
+        entryPrice: Number(pos.entryPrice.toFixed(8)),
+        exitPrice: Number((avgExit > 0 ? avgExit : pos.currentPrice).toFixed(6)),
+        quantity: Number(totalQty.toFixed(8)),
+        leverage: pos.leverage,
+        marginUsed: Number(marginUsed.toFixed(4)),
+        netPnl: Number(netPnl.toFixed(4)),
+        pnlPercent: marginUsed > 0 ? Number(((netPnl / marginUsed) * 100).toFixed(2)) : 0,
+        peakPnlUsdt: pos.peakPnlUsdt,
+        reversionUsdt: Math.max(0, (pos.peakPnlUsdt || 0) - netPnl),
+        volatilityLevel: 'NORMAL',
+        exitReason: fallbackReason ?? this.inferExitReason(pos, avgExit || pos.currentPrice),
+        strategyUsed: pos.strategyUsed,
+        isPaper: false,
+      };
+    }
+
+    // No fill evidence available. Only synthesise when the caller holds a REAL execution price
+    // (the avgPrice of the market order we just sent) — never from a mark-price guess.
+    if (!fallbackExitPrice || !(fallbackExitPrice > 0) || !(pos.entryPrice > 0)) return null;
+    const qty = pos.quantity > 0 ? pos.quantity : 0;
+    if (qty <= 0) return null;
+    const gross =
+      pos.side === 'LONG'
+        ? (fallbackExitPrice - pos.entryPrice) * qty
+        : (pos.entryPrice - fallbackExitPrice) * qty;
+    const exitFee = fallbackExitPrice * qty * 0.0005;
+    const netPnl = gross - exitFee;
+    const marginUsed = pos.marginUsed > 0 ? pos.marginUsed : (fallbackExitPrice * qty) / Math.max(1, pos.leverage);
+
+    return {
+      id: `pos_${pos.id}_filled`,
+      symbol: pos.symbol,
+      interval: pos.interval,
+      side: pos.side,
+      patternType: pos.patternType,
+      patternName: pos.patternName,
+      entryTime: pos.entryTime,
+      exitTime: Date.now(),
+      entryPrice: Number(pos.entryPrice.toFixed(8)),
+      exitPrice: Number(fallbackExitPrice.toFixed(6)),
+      quantity: Number(qty.toFixed(8)),
+      leverage: pos.leverage,
+      marginUsed: Number(marginUsed.toFixed(4)),
+      netPnl: Number(netPnl.toFixed(4)),
+      pnlPercent: marginUsed > 0 ? Number(((netPnl / marginUsed) * 100).toFixed(2)) : 0,
+      peakPnlUsdt: pos.peakPnlUsdt,
+      reversionUsdt: Math.max(0, (pos.peakPnlUsdt || 0) - netPnl),
+      volatilityLevel: 'NORMAL',
+      exitReason: fallbackReason ?? this.inferExitReason(pos, fallbackExitPrice),
+      strategyUsed: pos.strategyUsed,
+      isPaper: false,
+    };
+  }
+
+  /** Real account / income / userTrades history, merged (never overwritten) into closedTrades. */
+  private async syncClosedTradeHistory(parsedAcct: ParsedBinanceAccount, now: number): Promise<void> {
+    this.lastHistorySyncAt = now;
+    try {
+      const incomes = await this.binanceRest.income(80);
+      const incomeList = Array.isArray(incomes) ? incomes : [];
+
+      const distinctSyms = Array.from(
+        new Set([
+          ...this.activePositions.map((p) => p.symbol),
+          ...incomeList.map((i: any) => i?.symbol).filter(Boolean),
+        ])
+      ).slice(0, 6) as string[];
+
+      const tradeResults = await Promise.allSettled(
+        distinctSyms.map((sym) => this.binanceRest.userTrades(sym, 30))
+      );
+      const allUserTrades: any[] = [];
+      for (const res of tradeResults) {
+        if (res.status === 'fulfilled' && Array.isArray(res.value)) allUserTrades.push(...res.value);
+      }
+
+      const reconstructedHistory = reconstructLiveEquityHistoryFromIncome(
+        incomeList,
+        parsedAcct,
+        this.activePositions.length,
+        now
+      );
+      if (reconstructedHistory.length > 0) {
+        const cutoff = reconstructedHistory[reconstructedHistory.length - 1].timestamp;
+        const liveTail = this.equityHistory.filter((pt) => pt.timestamp > cutoff);
+        this.equityHistory = [...reconstructedHistory, ...liveTail].slice(-360);
+        for (const pt of this.equityHistory) {
+          if (pt.equity > this.peakEquity) this.peakEquity = pt.equity;
+        }
+        this.lastLiveSamplePushTime = now;
+      }
+
+      const realClosed = parseBinanceRealClosedTrades(incomeList, allUserTrades, this.leverage);
+      if (realClosed.length > 0) {
+        this.closedTrades = mergeClosedTrades(this.closedTrades, realClosed);
+        this.addLog(
+          'info',
+          'API',
+          `📜 已从币安合约实时同步 ${realClosed.length} 笔真实实盘成交与资金流水历史 (${reconstructedHistory.length} 个历史净值节点)`
+        );
+      }
+      this.hasSyncedLiveHistory = true;
+    } catch (err: any) {
+      // Keep hasSyncedLiveHistory=false so the next cheap window retries, but never spam.
+      if (now - this.lastSyncErrorLogTime > 60_000) {
+        this.lastSyncErrorLogTime = now;
+        this.addLog('warn', 'API', `⚠️ 币安历史交割单辅助同步受限: ${err?.message || '请求失败'}`);
+      }
+    }
   }
 
   private async setBinanceLeverage(symbol: string, leverage: number): Promise<void> {
     if (!this.hasApiCredentials()) return;
     try {
-      const timestamp = Date.now();
-      const qs = `symbol=${symbol}&leverage=${leverage}&timestamp=${timestamp}&recvWindow=10000`;
-      const sig = this.signQuery(qs);
-      const res = await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/leverage?${qs}&signature=${sig}`, {
-        method: 'POST',
-        headers: { 'X-MBX-APIKEY': this.apiKey },
-      });
-      if (!res.ok) {
-        const d: any = await res.json().catch(() => ({}));
-        this.addLog('warn', 'API', `设置 ${symbol} 杠杆 (${leverage}x) 返回提示: ${d?.msg || res.status}`, symbol);
-      }
+      await this.binanceRest.setLeverage(symbol, leverage);
     } catch (err: any) {
-      this.addLog('warn', 'API', `设置 ${symbol} 杠杆异常: ${err.message}`, symbol);
+      this.addLog('warn', 'API', `设置 ${symbol} 杠杆 (${leverage}x) 返回提示: ${err?.message || err}`, symbol);
     }
   }
 
@@ -1303,38 +1478,47 @@ class TradingEngine {
       );
     }
 
-    const timestamp = Date.now();
-    const qtyStr = formattedQty.toFixed(qtyDecimals);
     const derivedPosSide: 'LONG' | 'SHORT' =
       positionSide ||
       (reduceOnly ? (side === 'SELL' ? 'LONG' : 'SHORT') : side === 'BUY' ? 'LONG' : 'SHORT');
-    const modeParams = this.isHedgeMode
-      ? `&positionSide=${derivedPosSide}`
-      : reduceOnly
-      ? '&reduceOnly=true'
-      : '';
-    const qs = `symbol=${symbol}&side=${side}&type=MARKET&quantity=${qtyStr}${modeParams}&newOrderRespType=RESULT&timestamp=${timestamp}&recvWindow=10000`;
-    const sig = this.signQuery(qs);
 
-    const res = await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/order?${qs}&signature=${sig}`, {
-      method: 'POST',
-      headers: { 'X-MBX-APIKEY': this.apiKey },
-    });
+    const params: Record<string, string> = {
+      symbol,
+      side,
+      type: 'MARKET',
+      quantity: formattedQty.toFixed(qtyDecimals),
+      newOrderRespType: 'RESULT',
+    };
+    if (this.isHedgeMode) params.positionSide = derivedPosSide;
+    else if (reduceOnly) params.reduceOnly = 'true';
 
-    const data: any = await res.json().catch(() => ({}));
-    if (!res.ok) {
-      throw new Error(`[${data?.code ?? res.status}] ${data?.msg || `Binance API HTTP ${res.status}`}`);
+    const data: any = await this.binanceRest.placeOrder(params);
+    const executedQty = data?.executedQty ? parseFloat(data.executedQty) : formattedQty;
+    let avgPrice = data?.avgPrice ? parseFloat(data.avgPrice) : 0;
+    const cumQuote = data?.cumQuote ? parseFloat(data.cumQuote) : 0;
+    // MARKET orders frequently return avgPrice "0"; cumQuote/executedQty is the real fill price.
+    // Using the local scan price here was what stored synthetic entry prices on live positions.
+    if (!(avgPrice > 0) && cumQuote > 0 && executedQty > 0) {
+      avgPrice = cumQuote / executedQty;
     }
+
     return {
-      orderId: String(data.orderId),
-      executedQty: data.executedQty ? parseFloat(data.executedQty) : formattedQty,
-      avgPrice: data.avgPrice ? parseFloat(data.avgPrice) : undefined,
+      orderId: String(data?.orderId ?? ''),
+      executedQty,
+      avgPrice: avgPrice > 0 ? avgPrice : undefined,
     };
   }
 
   /**
-   * Place direct exchange-level conditional orders on Binance Futures (STOP_MARKET or TAKE_PROFIT_MARKET)
-   * Supports both One-Way Mode (reduceOnly) and Hedge Mode (positionSide), with tickSize rounding and Algo endpoint fallback.
+   * Place an exchange-side STOP_MARKET / TAKE_PROFIT_MARKET order.
+   *
+   * Changes vs. the previous implementation:
+   *  - the trigger price is validated against the real mark price first, so Binance can no longer
+   *    reject it with -2021 "Order would immediately trigger" and leave the leg unprotected;
+   *  - `-4120` ("use the Algo Order API") is NO LONGER reported as "already protected". That
+   *    mis-reading stored the sentinel `exchange_existing_order` as an order id, so the engine
+   *    believed a naked position had a stop;
+   *  - the Algo endpoint (IP weight 0) is tried as a real fallback instead of being decorative.
    */
   private async placeBinanceConditionalOrder(
     symbol: string,
@@ -1342,7 +1526,8 @@ class TradingEngine {
     type: 'STOP_MARKET' | 'TAKE_PROFIT_MARKET',
     stopPrice: number,
     quantity?: number,
-    positionSide?: 'LONG' | 'SHORT'
+    positionSide?: 'LONG' | 'SHORT',
+    referencePrice?: number
   ): Promise<{ orderId: string } | null> {
     if (!this.hasApiCredentials() || !Number.isFinite(stopPrice) || stopPrice <= 0) return null;
 
@@ -1351,122 +1536,353 @@ class TradingEngine {
     const formattedPrice = formatToStep(stopPrice, rules.tickSize, 'round');
     if (formattedPrice <= 0) return null;
     const priceStr = formattedPrice.toFixed(priceDecimals);
-    const baseUrl = this.getFuturesBaseUrl();
-    const derivedPosSide: 'LONG' | 'SHORT' = positionSide || (side === 'SELL' ? 'LONG' : 'SHORT');
-    const hedgeParam = this.isHedgeMode ? `&positionSide=${derivedPosSide}` : '';
 
-    // Attempt 1: Standard closePosition=true + MARK_PRICE + priceProtect
-    try {
-      const ts1 = Date.now();
-      const qs1 = `symbol=${symbol}&side=${side}&type=${type}&stopPrice=${priceStr}&closePosition=true${hedgeParam}&workingType=MARK_PRICE&priceProtect=TRUE&timestamp=${ts1}&recvWindow=10000`;
-      const sig1 = this.signQuery(qs1);
-      const res1 = await fetch(`${baseUrl}/fapi/v1/order?${qs1}&signature=${sig1}`, {
-        method: 'POST',
-        headers: { 'X-MBX-APIKEY': this.apiKey },
-      });
-      const data1: any = await res1.json().catch(() => ({}));
-      if (res1.ok && data1?.orderId) {
-        return { orderId: String(data1.orderId) };
+    if (referencePrice && referencePrice > 0) {
+      const p = Number(priceStr);
+      const closingLong = side === 'SELL';
+      const valid =
+        type === 'STOP_MARKET'
+          ? closingLong
+            ? p < referencePrice * 0.999
+            : p > referencePrice * 1.001
+          : closingLong
+          ? p > referencePrice * 1.001
+          : p < referencePrice * 0.999;
+      if (!valid) {
+        this.addLog(
+          'warn',
+          'API',
+          `⚠️ [条件单方向校验拦截] ${symbol} ${type} @ $${priceStr} 相对标记价 $${referencePrice} 方向错误（下单必被 -2021 拒绝），已跳过并交由本地风控接管`,
+          symbol
+        );
+        return null;
       }
+    }
 
-      // Attempt 2: Quantity + positionSide (Hedge Mode) OR reduceOnly=true (One-Way Mode)
-      if (quantity && quantity > 0) {
-        const qtyDecimals = countStepDecimals(rules.stepSize);
-        const formattedQty = formatToStep(quantity, rules.stepSize, 'floor');
-        if (formattedQty >= rules.minQty) {
-          const ts2 = Date.now();
-          const closeModeParam = this.isHedgeMode
-            ? `&positionSide=${derivedPosSide}`
-            : '&reduceOnly=true';
-          const qs2 = `symbol=${symbol}&side=${side}&type=${type}&stopPrice=${priceStr}&quantity=${formattedQty.toFixed(
-            qtyDecimals
-          )}${closeModeParam}&workingType=MARK_PRICE&timestamp=${ts2}&recvWindow=10000`;
-          const sig2 = this.signQuery(qs2);
-          const res2 = await fetch(`${baseUrl}/fapi/v1/order?${qs2}&signature=${sig2}`, {
-            method: 'POST',
-            headers: { 'X-MBX-APIKEY': this.apiKey },
-          });
-          const data2: any = await res2.json().catch(() => ({}));
-          if (res2.ok && data2?.orderId) {
-            return { orderId: String(data2.orderId) };
+    const derivedPosSide: 'LONG' | 'SHORT' = positionSide || (side === 'SELL' ? 'LONG' : 'SHORT');
+    const finalQty =
+      quantity && quantity > 0 ? formatToStep(quantity, rules.stepSize, 'floor') : 0;
+    const errors: string[] = [];
+
+    // Attempt 1: legacy order endpoint with closePosition=true (closes whatever is open).
+    try {
+      const params: Record<string, string> = {
+        symbol,
+        side,
+        type,
+        stopPrice: priceStr,
+        closePosition: 'true',
+        workingType: 'MARK_PRICE',
+        priceProtect: 'TRUE',
+      };
+      if (this.isHedgeMode) params.positionSide = derivedPosSide;
+      const data: any = await this.binanceRest.placeOrder(params);
+      if (data?.orderId) return { orderId: String(data.orderId) };
+      errors.push('legacy/closePosition 未返回 orderId');
+    } catch (err: any) {
+      errors.push(err?.message || String(err));
+      if (err instanceof BinanceApiError && err.code === -2021) {
+        this.addLog('warn', 'API', `⚠️ [止损/止盈立即触发被拒] ${symbol} ${type} @ $${priceStr}，已改为本地追踪管理`, symbol);
+        return null;
+      }
+    }
+
+    // Attempt 2: legacy order endpoint with explicit quantity + reduceOnly / positionSide.
+    if (finalQty >= rules.minQty) {
+      try {
+        const params: Record<string, string> = {
+          symbol,
+          side,
+          type,
+          stopPrice: priceStr,
+          quantity: finalQty.toFixed(countStepDecimals(rules.stepSize)),
+          workingType: 'MARK_PRICE',
+        };
+        if (this.isHedgeMode) params.positionSide = derivedPosSide;
+        else params.reduceOnly = 'true';
+        const data: any = await this.binanceRest.placeOrder(params);
+        if (data?.orderId) return { orderId: String(data.orderId) };
+        errors.push('legacy/quantity 未返回 orderId');
+      } catch (err: any) {
+        errors.push(err?.message || String(err));
+      }
+    }
+
+    // Attempt 3: Binance Algo conditional-order endpoint (0 IP weight).
+    try {
+      const params: Record<string, string> = {
+        algoType: 'CONDITIONAL',
+        symbol,
+        side,
+        type,
+        triggerPrice: priceStr,
+        workingType: 'MARK_PRICE',
+      };
+      if (finalQty >= rules.minQty) {
+        params.quantity = finalQty.toFixed(countStepDecimals(rules.stepSize));
+      } else {
+        params.closePosition = 'true';
+      }
+      if (this.isHedgeMode) params.positionSide = derivedPosSide;
+      const data: any = await this.binanceRest.placeAlgoOrder(params);
+      const algoId = data?.algoId ?? data?.clientAlgoId ?? data?.orderId;
+      if (algoId) return { orderId: `algo:${algoId}` };
+      errors.push('algo 未返回 algoId');
+    } catch (err: any) {
+      errors.push(err?.message || String(err));
+    }
+
+    this.addLog(
+      'error',
+      'API',
+      `❌ 交易所直挂条件单失败 (${symbol} ${type} @ $${priceStr})，三种通道均未成功，仓位暂由本地风控接管: ${errors.join(' | ')}`,
+      symbol
+    );
+    return null;
+  }
+
+  /**
+   * Cancel a specific order on Binance Futures. Algo ids are prefixed with `algo:`.
+   */
+  private async cancelBinanceOrder(symbol: string, orderId: string): Promise<void> {
+    if (!this.hasApiCredentials() || !orderId) return;
+    if (orderId === 'exchange_existing_order') return; // legacy sentinel from an older build
+    const isAlgo = orderId.startsWith('algo:');
+    const rawId = isAlgo ? orderId.slice(5) : orderId;
+    try {
+      if (isAlgo) await this.binanceRest.cancelAlgoOrder(symbol, rawId);
+      else await this.binanceRest.cancelOrder(symbol, rawId);
+    } catch {
+      // order may already be filled/cancelled — nothing to do
+    }
+  }
+
+  /**
+   * Cancel all open orders for a symbol, including Algo-book conditional orders that
+   * `DELETE /fapi/v1/allOpenOrders` does not cover.
+   */
+  private async cancelAllBinanceOrders(symbol: string, _includeAlgo: boolean = true): Promise<void> {
+    if (!this.hasApiCredentials()) return;
+    try {
+      await this.binanceRest.cancelAllOpenOrders(symbol);
+    } catch {
+      // ignore: symbol may have no open orders
+    }
+
+    const tracked = this.activePositions.filter((p) => p.symbol === symbol);
+    for (const pos of tracked) {
+      for (const id of [pos.stopLossOrderId, pos.takeProfitOrderId]) {
+        if (id && id.startsWith('algo:')) {
+          try {
+            await this.binanceRest.cancelAlgoOrder(symbol, id.slice(5));
+          } catch {
+            // already gone
+          }
+        }
+      }
+    }
+  }
+
+  private registerCloseFailure(symbol: string): void {
+    const count = (this.closeFailureCount.get(symbol) ?? 0) + 1;
+    this.closeFailureCount.set(symbol, count);
+    if (count >= 3) {
+      this.closeRetryAfter.set(symbol, Date.now() + 60_000);
+      this.addLog(
+        'error',
+        'API',
+        `⛔ [平仓连续失败熔断] ${symbol} 已连续 ${count} 次平仓失败，暂停自动重试 60 秒（请检查持仓模式/保证金/最小下单量）`,
+        symbol
+      );
+    }
+  }
+
+  private clearCloseFailure(symbol: string): void {
+    this.closeFailureCount.delete(symbol);
+    this.closeRetryAfter.delete(symbol);
+  }
+
+  /**
+   * Mirror a ratcheting trailing stop onto the exchange.
+   * Previously `trailingStopPrice` existed only in memory: a process restart left the original
+   * (wider) exchange stop in force while the UI claimed profits were locked in.
+   */
+  private async syncTrailingStopToExchange(pos: ActivePosition): Promise<void> {
+    if (pos.isPaper || !this.hasApiCredentials()) return;
+    const desired = pos.trailingStopPrice;
+    if (!desired || !(desired > 0) || !(pos.currentPrice > 0)) return;
+    const now = Date.now();
+    if (now - this.lastTrailingExchangeSyncAt < 10_000) return;
+    // Only push when the improvement is material, otherwise we burn weight on every tick.
+    if (
+      pos.stopLossPrice &&
+      pos.stopLossPrice > 0 &&
+      Math.abs(desired - pos.stopLossPrice) / pos.stopLossPrice < 0.0015
+    ) {
+      return;
+    }
+    if (!this.binanceRest.canAfford(4)) return;
+    this.lastTrailingExchangeSyncAt = now;
+
+    const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+    const placed = await this.placeBinanceConditionalOrder(
+      pos.symbol,
+      closeSide,
+      'STOP_MARKET',
+      desired,
+      pos.quantity,
+      pos.side,
+      pos.currentPrice
+    );
+    if (!placed?.orderId) return;
+    const oldId = pos.stopLossOrderId;
+    pos.stopLossPrice = desired;
+    pos.stopLossOrderId = placed.orderId;
+    // Cancel the superseded stop only after the replacement is live.
+    if (oldId && oldId !== placed.orderId) {
+      await this.cancelBinanceOrder(pos.symbol, oldId);
+    }
+    this.addLog(
+      'info',
+      'API',
+      `📈 [移动止损已同步至交易所] ${pos.symbol} STOP_MARKET 上移至 $${desired.toFixed(2)} (#${placed.orderId})`,
+      pos.symbol
+    );
+  }
+
+  /** Real quantity currently open on the exchange for a symbol/side, or null if unknown. */
+  private async getExchangePositionQty(
+    symbol: string,
+    side: 'LONG' | 'SHORT'
+  ): Promise<number | null> {
+    try {
+      const list = await this.binanceRest.positionRisk();
+      if (!Array.isArray(list)) return null;
+      const match = list.find((p) => {
+        const amt = parseFloat(p?.positionAmt || '0');
+        return p?.symbol === symbol && (amt > 0 ? 'LONG' : 'SHORT') === side;
+      });
+      if (!match) return 0;
+      return Math.abs(parseFloat(match.positionAmt || '0'));
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Stop price guaranteed to sit on the correct side of the current mark price.
+   * Preferred level is the configured -1.5% from entry; when the market has already run past it
+   * (e.g. a position adopted from the exchange with no stop), fall back to a -1.5% stop from the
+   * current mark instead of the extremely tight 0.6% one, which would be chopped instantly.
+   */
+  private computeSafeStopPrice(
+    side: 'LONG' | 'SHORT',
+    entryPrice: number,
+    markPrice: number
+  ): number | null {
+    if (!(entryPrice > 0) || !(markPrice > 0)) return null;
+    if (side === 'LONG') {
+      const preferred = entryPrice * 0.985;
+      const candidate = preferred < markPrice * 0.995 ? preferred : markPrice * 0.985;
+      return candidate > 0 ? candidate : null;
+    }
+    const preferred = entryPrice * 1.015;
+    const candidate = preferred > markPrice * 1.005 ? preferred : markPrice * 1.015;
+    return candidate > 0 ? candidate : null;
+  }
+
+  /** Take-profit price guaranteed to sit on the correct side of the current mark price. */
+  private computeSafeTakeProfitPrice(
+    side: 'LONG' | 'SHORT',
+    entryPrice: number,
+    markPrice: number
+  ): number | null {
+    if (!(entryPrice > 0) || !(markPrice > 0)) return null;
+    if (side === 'LONG') {
+      const preferred = entryPrice * 1.033;
+      const candidate = preferred > markPrice * 1.005 ? preferred : markPrice * 1.02;
+      return candidate > 0 ? candidate : null;
+    }
+    const preferred = entryPrice * 0.967;
+    const candidate = preferred < markPrice * 0.995 ? preferred : markPrice * 0.98;
+    return candidate > 0 ? candidate : null;
+  }
+
+  /**
+   * Re-attach exchange-side protection for positions that have none.
+   * Levels are derived from the REAL mark price, never from the scan series.
+   */
+  private async repairProtectiveOrders(positions: ActivePosition[]): Promise<void> {
+    if (!this.hasApiCredentials()) return;
+    const now = Date.now();
+    if (now - this.lastProtectiveRepairAt < 5_000) return;
+    this.lastProtectiveRepairAt = now;
+
+    for (const pos of positions) {
+      if (!(pos.currentPrice > 0) || !(pos.entryPrice > 0) || !(pos.quantity > 0)) continue;
+      const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+      const protKey = `${pos.symbol}:${pos.side}`;
+      // If we attached protection recently, do not attach it again: on deployments where the
+      // algo-order query is unavailable our own new stop is invisible to `openOrders`, and
+      // without this guard the engine would place a duplicate SL/TP on every 5s sync.
+      if (now - (this.protectionPlacedAt.get(protKey) ?? 0) < 120_000) continue;
+      let placedAny = false;
+
+      if (!pos.stopLossOrderId) {
+        if (!this.binanceRest.canAfford(6)) return;
+        const safeSl = this.computeSafeStopPrice(pos.side, pos.entryPrice, pos.currentPrice);
+        if (safeSl) {
+          const placed = await this.placeBinanceConditionalOrder(
+            pos.symbol,
+            closeSide,
+            'STOP_MARKET',
+            safeSl,
+            pos.quantity,
+            pos.side,
+            pos.currentPrice
+          );
+          if (placed?.orderId) {
+            placedAny = true;
+            pos.stopLossPrice = safeSl;
+            pos.stopLossOrderId = placed.orderId;
+            this.addLog(
+              'info',
+              'API',
+              `🛡️ [实盘持仓补挂交易所止损] 为 ${pos.symbol} (${pos.side}) 补挂 STOP_MARKET @ $${safeSl.toFixed(2)} (#${placed.orderId})`,
+              pos.symbol
+            );
           }
         }
       }
 
-      // Attempt 3: Binance Algo Conditional Order endpoint (/fapi/v1/algoOrder)
-      const ts3 = Date.now();
-      const qs3 = `algoType=CONDITIONAL&symbol=${symbol}&side=${side}&type=${type}&triggerPrice=${priceStr}&closePosition=true${hedgeParam}&workingType=MARK_PRICE&timestamp=${ts3}&recvWindow=10000`;
-      const sig3 = this.signQuery(qs3);
-      const res3 = await fetch(`${baseUrl}/fapi/v1/algoOrder?${qs3}&signature=${sig3}`, {
-        method: 'POST',
-        headers: { 'X-MBX-APIKEY': this.apiKey },
-      });
-      const data3: any = await res3.json().catch(() => ({}));
-      if (res3.ok && (data3?.algoId || data3?.clientAlgoId)) {
-        return { orderId: String(data3.algoId || data3.clientAlgoId) };
+      if (!pos.takeProfitOrderId) {
+        if (!this.binanceRest.canAfford(6)) return;
+        const safeTp = this.computeSafeTakeProfitPrice(pos.side, pos.entryPrice, pos.currentPrice);
+        if (safeTp) {
+          const placed = await this.placeBinanceConditionalOrder(
+            pos.symbol,
+            closeSide,
+            'TAKE_PROFIT_MARKET',
+            safeTp,
+            pos.quantity,
+            pos.side,
+            pos.currentPrice
+          );
+          if (placed?.orderId) {
+            placedAny = true;
+            pos.takeProfitPrice = safeTp;
+            pos.takeProfitOrderId = placed.orderId;
+            this.addLog(
+              'info',
+              'API',
+              `🎯 [实盘持仓补挂交易所止盈] 为 ${pos.symbol} (${pos.side}) 补挂 TAKE_PROFIT_MARKET @ $${safeTp.toFixed(2)} (#${placed.orderId})`,
+              pos.symbol
+            );
+          }
+        }
       }
 
-      const isAlreadyExists = data1?.code === -4120 || data3?.code === -4120;
-      if (isAlreadyExists) {
-        this.addLog(
-          'info',
-          'API',
-          `ℹ️ [${symbol}] 交易所已有同向止损/止盈单挂单，确认受保护 (${type} @ $${priceStr})`,
-          symbol
-        );
-        return { orderId: 'exchange_existing_order' };
-      }
-
-      this.addLog(
-        'error',
-        'API',
-        `❌ 交易所直挂条件单失败 (${symbol} ${type} @ $${priceStr}): [${data1?.code ?? res1.status}] ${
-          data1?.msg || '未知错误'
-        } / Algo重试: ${data3?.msg || res3.status}`,
-        symbol
-      );
-      return null;
-    } catch (err: any) {
-      this.addLog('error', 'API', `❌ 提交交易所直挂单异常 (${symbol} ${type}): ${err.message}`, symbol);
-      return null;
-    }
-  }
-
-  /**
-   * Cancel specific order on Binance Futures
-   */
-  private async cancelBinanceOrder(symbol: string, orderId: string): Promise<void> {
-    if (!this.hasApiCredentials() || !orderId) return;
-    try {
-      const timestamp = Date.now();
-      const qs = `symbol=${symbol}&orderId=${orderId}&timestamp=${timestamp}&recvWindow=10000`;
-      const sig = this.signQuery(qs);
-
-      await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/order?${qs}&signature=${sig}`, {
-        method: 'DELETE',
-        headers: { 'X-MBX-APIKEY': this.apiKey },
-      });
-    } catch {
-      // ignore
-    }
-  }
-
-  /**
-   * Cancel all open conditional orders for symbol on Binance Futures
-   */
-  private async cancelAllBinanceOrders(symbol: string): Promise<void> {
-    if (!this.hasApiCredentials()) return;
-    try {
-      const timestamp = Date.now();
-      const qs = `symbol=${symbol}&timestamp=${timestamp}&recvWindow=10000`;
-      const sig = this.signQuery(qs);
-
-      await fetch(`${this.getFuturesBaseUrl()}/fapi/v1/allOpenOrders?${qs}&signature=${sig}`, {
-        method: 'DELETE',
-        headers: { 'X-MBX-APIKEY': this.apiKey },
-      });
-    } catch {
-      // ignore
+      if (placedAny) this.protectionPlacedAt.set(protKey, Date.now());
     }
   }
 
@@ -2017,7 +2433,13 @@ class TradingEngine {
           const newQty = formatToStep(oldQty - reduceQty, rules.stepSize, 'floor');
           const hedgePct = oldQty > 0 ? Math.round((reduceQty / oldQty) * 100) : 0;
 
-          if (reduceQty >= rules.minQty && newQty >= rules.minQty) {
+          // HARD COOLDOWN. This method runs on every 10s cycle; without a cooldown it chopped 40%
+          // off the same position over and over (0.75 -> 0.45 -> 0.27 ...) until it was dust,
+          // paying taker fees each time and leaving the exchange stop at the old size.
+          const lastHedgeAt = this.lastCorrelationHedgeAt.get(weakerPos.symbol) ?? 0;
+          const hedgeCooling = Date.now() - lastHedgeAt < 30 * 60_000;
+
+          if (!hedgeCooling && reduceQty >= rules.minQty && newQty >= rules.minQty) {
             if (!weakerPos.isPaper && hasKeys) {
               try {
                 await this.placeBinanceMarketOrder(
@@ -2040,6 +2462,8 @@ class TradingEngine {
               weakerPos.quantity = newQty;
               weakerPos.marginUsed = Number((weakerPos.marginUsed * (newQty / oldQty)).toFixed(2));
             }
+
+            this.lastCorrelationHedgeAt.set(weakerPos.symbol, Date.now());
 
             const hedgeLog: CorrelationHedgingState = {
               pairName: `${pos1.symbol} / ${pos2.symbol}`,
@@ -2370,15 +2794,32 @@ class TradingEngine {
     this.notifyListeners(true);
   }
 
-  public async emergencyClosePosition(reason: ExitReason = 'END_OF_DATA', symbol?: string) {
+  public async emergencyClosePosition(
+    reason: ExitReason = 'END_OF_DATA',
+    symbol?: string
+  ): Promise<{ closed: number; failed: number }> {
     if (!symbol) {
-      return this.closeAllPositions(reason);
+      const res = await this.closeAllPositions(reason);
+      return { closed: res.closedCount, failed: Math.max(0, this.activePositions.length) };
     }
     const positionsToClose = this.activePositions.filter((p) => p.symbol === symbol);
+    let closed = 0;
+    let failed = 0;
     for (const pos of positionsToClose) {
-      await this.closePosition(pos, pos.currentPrice, reason);
-      this.addLog('warn', 'ORDER', `⚠️ 平仓完成: [${pos.symbol} ${pos.interval}] ${pos.side} @ ${pos.currentPrice} USDT`, pos.symbol);
+      const ok = await this.closePosition(pos, pos.currentPrice, reason);
+      if (ok) {
+        closed += 1;
+        this.addLog(
+          'warn',
+          'ORDER',
+          `⚠️ 平仓完成: [${pos.symbol} ${pos.interval}] ${pos.side} @ ${pos.currentPrice} USDT`,
+          pos.symbol
+        );
+      } else {
+        failed += 1;
+      }
     }
+    return { closed, failed };
   }
 
   public async closeAllPositions(
@@ -2533,13 +2974,21 @@ class TradingEngine {
       await Promise.allSettled([
         this.refreshExchangeRulesIfNeeded(false),
         this.refreshTickersSnapshot(),
-        ...(hasKeys ? [this.syncBinanceAccountAndPositions(false)] : []),
+        ...(hasKeys ? [this.syncLiveAccountNow(false)] : []),
       ]);
 
       // ZERO-TOUCH AUTO-EVOLUTION: Automatically absorb AI Diagnostic Recommended Timeframe into scanning pool!
+      // Capped at 4 timeframes: every extra timeframe costs one kline request per symbol every
+      // cycle, and an unbounded pool was silently multiplying API weight (5 symbols x 8 TF = 40
+      // requests per 10s).
       const diagnostic = this.getTimeframeDiagnosticReport();
       const recTf = diagnostic.recommendedTimeframe;
-      if (recTf && !this.monitoredTimeframes.includes(recTf) && ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'].includes(recTf)) {
+      if (
+        recTf &&
+        !this.monitoredTimeframes.includes(recTf) &&
+        this.monitoredTimeframes.length < 4 &&
+        ['1m', '3m', '5m', '15m', '30m', '1h', '4h', '1d'].includes(recTf)
+      ) {
         this.monitoredTimeframes.push(recTf);
         this.addLog(
           'info',
@@ -2582,6 +3031,12 @@ class TradingEngine {
       const portfolioAlloc = this.getPortfolioAllocation();
 
       for (const symbol of this.monitoredSymbols) {
+        const symRules = this.getSymbolRules(symbol);
+        if (hasKeys && symRules.available === false) {
+          // Symbol is not tradable on Binance USDT-M (or its feed is permanently unavailable):
+          // skip the scan entirely instead of burning kline weight every 10 seconds.
+          continue;
+        }
         for (const interval of this.monitoredTimeframes) {
           try {
             const fetchResult = await fetchBinanceKlines({
@@ -2742,13 +3197,18 @@ class TradingEngine {
                 if (gainPercent >= dynamicBreakevenPercent || pos.peakPnlUsdt >= dynamicBreakevenUsdt) {
                   const safeCostLong = pos.entryPrice * 1.0015;
                   const safeCostShort = pos.entryPrice * 0.9985;
+                  // Only ratchet to breakeven while price is still on the profitable side.
+                  // Moving a long's stop above the current market makes Binance reject it with
+                  // -2021 and, in the old build, silently left the leg "protected" in the UI only.
+                  const canMoveLong = pos.side === 'LONG' && evalPrice > safeCostLong * 1.002;
+                  const canMoveShort = pos.side === 'SHORT' && evalPrice < safeCostShort * 0.998;
                   let moved = false;
 
-                  if (pos.side === 'LONG' && (pos.stopLossPrice === null || pos.stopLossPrice < safeCostLong)) {
+                  if (canMoveLong && (pos.stopLossPrice === null || pos.stopLossPrice < safeCostLong)) {
                     pos.stopLossPrice = safeCostLong;
                     moved = true;
                     this.addLog('success', 'ORDER', `🛡️ [${symbol} 自动保本触发] 浮盈已达 ${gainPercent.toFixed(1)}% (+$${pos.peakPnlUsdt.toFixed(1)} USDT)，自动拉升止损至开仓保本价 ($${safeCostLong.toFixed(2)})，彻底锁定本金零亏损！`, symbol);
-                  } else if (pos.side === 'SHORT' && (pos.stopLossPrice === null || pos.stopLossPrice > safeCostShort)) {
+                  } else if (canMoveShort && (pos.stopLossPrice === null || pos.stopLossPrice > safeCostShort)) {
                     pos.stopLossPrice = safeCostShort;
                     moved = true;
                     this.addLog('success', 'ORDER', `🛡️ [${symbol} 自动保本触发] 浮盈已达 ${gainPercent.toFixed(1)}% (+$${pos.peakPnlUsdt.toFixed(1)} USDT)，自动下调止损至开仓保本价 ($${safeCostShort.toFixed(2)})，彻底锁定本金零亏损！`, symbol);
@@ -2756,19 +3216,24 @@ class TradingEngine {
 
                   // Sync conditional order on Binance Futures matching engine if real exchange API keys are present
                   if (moved && !pos.isPaper && this.hasApiCredentials() && pos.stopLossPrice) {
-                    if (pos.stopLossOrderId) {
-                      await this.cancelBinanceOrder(symbol, pos.stopLossOrderId);
-                    }
+                    const closeSide = pos.side === 'LONG' ? 'SELL' : 'BUY';
+                    // Place the new stop FIRST, then cancel the old one: never leave the position
+                    // unprotected in between (the old code cancelled first).
                     const newSl = await this.placeBinanceConditionalOrder(
                       symbol,
-                      pos.side === 'LONG' ? 'SELL' : 'BUY',
+                      closeSide,
                       'STOP_MARKET',
                       pos.stopLossPrice,
                       pos.quantity,
-                      pos.side
+                      pos.side,
+                      evalPrice
                     );
                     if (newSl?.orderId) {
+                      const oldId = pos.stopLossOrderId;
                       pos.stopLossOrderId = newSl.orderId;
+                      if (oldId && oldId !== newSl.orderId) {
+                        await this.cancelBinanceOrder(symbol, oldId);
+                      }
                       this.addLog('info', 'API', `⚡ [币安交易所自动保本挂单更新成功] 挂单价: $${pos.stopLossPrice.toFixed(2)} (单号 #${newSl.orderId})`, symbol);
                     }
                   }
@@ -2788,23 +3253,24 @@ class TradingEngine {
 
               // 4. Liquidation Check
               if (!exitTriggered) {
-                if (pos.side === 'LONG' && currentPrice <= pos.liquidationPrice) {
+                if (pos.side === 'LONG' && evalPrice <= pos.liquidationPrice) {
                   exitTriggered = 'LIQUIDATION';
-                } else if (pos.side === 'SHORT' && currentPrice >= pos.liquidationPrice) {
+                } else if (pos.side === 'SHORT' && evalPrice >= pos.liquidationPrice) {
                   exitTriggered = 'LIQUIDATION';
                 }
               }
 
               // 5. Structural Stop Loss (形态极值止损)
+              // Evaluated on the same price basis the exchange's MARK_PRICE conditional orders use.
               if (!exitTriggered && pos.stopLossPrice !== null) {
-                if (pos.side === 'LONG' && currentPrice <= pos.stopLossPrice) exitTriggered = 'STOP_LOSS';
-                else if (pos.side === 'SHORT' && currentPrice >= pos.stopLossPrice) exitTriggered = 'STOP_LOSS';
+                if (pos.side === 'LONG' && evalPrice <= pos.stopLossPrice) exitTriggered = 'STOP_LOSS';
+                else if (pos.side === 'SHORT' && evalPrice >= pos.stopLossPrice) exitTriggered = 'STOP_LOSS';
               }
 
               // 6. Structural Take Profit (形态结构目标止盈: 2.2x~2.5x 盈亏比)
               if (!exitTriggered && pos.takeProfitPrice !== null) {
-                if (pos.side === 'LONG' && currentPrice >= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
-                else if (pos.side === 'SHORT' && currentPrice <= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
+                if (pos.side === 'LONG' && evalPrice >= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
+                else if (pos.side === 'SHORT' && evalPrice <= pos.takeProfitPrice) exitTriggered = 'TAKE_PROFIT';
               }
 
               // 7. Dynamic Trailing Stop-Loss Feature (用户可配置激活阈值 & 步进距离)
@@ -2841,9 +3307,10 @@ class TradingEngine {
                     const candidateStop = pos.trailingPeakPrice * (1 - callbackRate);
                     if (pos.trailingStopPrice === null || pos.trailingStopPrice === undefined || candidateStop > pos.trailingStopPrice) {
                       pos.trailingStopPrice = candidateStop;
+                      await this.syncTrailingStopToExchange(pos);
                     }
 
-                    if (currentPrice <= pos.trailingStopPrice) {
+                    if (evalPrice <= pos.trailingStopPrice) {
                       exitTriggered = 'TRAILING_STOP';
                       this.addLog(
                         'success',
@@ -2857,9 +3324,10 @@ class TradingEngine {
                     const candidateStop = pos.trailingPeakPrice * (1 + callbackRate);
                     if (pos.trailingStopPrice === null || pos.trailingStopPrice === undefined || candidateStop < pos.trailingStopPrice) {
                       pos.trailingStopPrice = candidateStop;
+                      await this.syncTrailingStopToExchange(pos);
                     }
 
-                    if (currentPrice >= pos.trailingStopPrice) {
+                    if (evalPrice >= pos.trailingStopPrice) {
                       exitTriggered = 'TRAILING_STOP';
                       this.addLog(
                         'success',
@@ -2889,10 +3357,10 @@ class TradingEngine {
                 this.addLog(
                   exitTriggered === 'TAKE_PROFIT' || exitTriggered === 'TRAILING_STOP' ? 'success' : 'warn',
                   'ORDER',
-                  `🎯 [${symbol} ${pos.interval}] 触发平仓条件: ${exitTriggered} @ ${currentPrice} USDT`,
+                  `🎯 [${symbol} ${pos.interval}] 触发平仓条件: ${exitTriggered} @ ${evalPrice} USDT`,
                   symbol
                 );
-                await this.closePosition(pos, currentPrice, exitTriggered);
+                await this.closePosition(pos, evalPrice, exitTriggered);
                 continue;
               }
 
@@ -3279,48 +3747,61 @@ class TradingEngine {
                 if (hasKeys) {
                   const closeSide = side === 'LONG' ? 'SELL' : 'BUY';
 
-                  // A. 必挂交易所 STOP_MARKET 止损单 (带 3 次重试机制)
-                  if (stopLossPrice !== null && stopLossPrice > 0) {
-                    let slRes: { orderId: string } | null = null;
-                    for (let retry = 0; retry < 3; retry++) {
-                      slRes = await this.placeBinanceConditionalOrder(
-                        symbol,
-                        closeSide,
-                        'STOP_MARKET',
-                        stopLossPrice,
-                        actualQty,
-                        side
-                      );
-                      if (slRes?.orderId) break;
-                      await new Promise((r) => setTimeout(r, 1000));
-                    }
+                  // Re-derive the stop/target from the REAL fill price. The levels produced by the
+                  // pattern engine come from the scan series; if they sit on the wrong side of the
+                  // actual fill Binance rejects them with -2021 and the position runs naked.
+                  let liveSlPrice = stopLossPrice;
+                  if (!(side === 'LONG' ? liveSlPrice < actualEntryPrice * 0.999 : liveSlPrice > actualEntryPrice * 1.001)) {
+                    const safeSl = this.computeSafeStopPrice(side, actualEntryPrice, actualEntryPrice);
+                    if (safeSl) liveSlPrice = safeSl;
+                  }
+                  let liveTpPrice = takeProfitPrice;
+                  if (!(side === 'LONG' ? liveTpPrice > actualEntryPrice * 1.001 : liveTpPrice < actualEntryPrice * 0.999)) {
+                    const safeTp = this.computeSafeTakeProfitPrice(side, actualEntryPrice, actualEntryPrice);
+                    if (safeTp) liveTpPrice = safeTp;
+                  }
+
+                  // A. 必挂交易所 STOP_MARKET 止损单（三次端点回退已在内部完成，失败会明确返回 null）
+                  if (liveSlPrice !== null && liveSlPrice > 0) {
+                    const slRes = await this.placeBinanceConditionalOrder(
+                      symbol,
+                      closeSide,
+                      'STOP_MARKET',
+                      liveSlPrice,
+                      actualQty,
+                      side,
+                      actualEntryPrice
+                    );
 
                     if (slRes?.orderId) {
                       stopLossOrderId = slRes.orderId;
-                      this.addLog('info', 'API', `🛡️ [交易所必挂止损单 OK] ${symbol} STOP_MARKET @ $${stopLossPrice.toFixed(2)} (#${slRes.orderId})`, symbol);
+                      stopLossPrice = liveSlPrice;
+                      this.addLog('info', 'API', `🛡️ [交易所必挂止损单 OK] ${symbol} STOP_MARKET @ $${liveSlPrice.toFixed(2)} (#${slRes.orderId})`, symbol);
                     } else {
                       this.addLog(
                         'warn',
                         'API',
-                        `⚠️ [止损单重试挂载提示] ${symbol} 交易所条件单请求三次未返回，已启用应用层动态追踪保护与本地风控，保持持仓继续运行。`,
+                        `⚠️ [止损单挂载失败] ${symbol} 三种通道均未成功，已转为应用层动态止损盯盘（下个同步周期会自动补挂）`,
                         symbol
                       );
                     }
                   }
 
                   // B. 必挂交易所 TAKE_PROFIT_MARKET 止盈单
-                  if (takeProfitPrice !== null && takeProfitPrice > 0) {
+                  if (liveTpPrice !== null && liveTpPrice > 0) {
                     const tpRes = await this.placeBinanceConditionalOrder(
                       symbol,
                       closeSide,
                       'TAKE_PROFIT_MARKET',
-                      takeProfitPrice,
+                      liveTpPrice,
                       actualQty,
-                      side
+                      side,
+                      actualEntryPrice
                     );
                     if (tpRes?.orderId) {
                       takeProfitOrderId = tpRes.orderId;
-                      this.addLog('info', 'API', `🎯 [交易所必挂止盈单 OK] ${symbol} TAKE_PROFIT_MARKET @ $${takeProfitPrice.toFixed(2)} (#${tpRes.orderId})`, symbol);
+                      takeProfitPrice = liveTpPrice;
+                      this.addLog('info', 'API', `🎯 [交易所必挂止盈单 OK] ${symbol} TAKE_PROFIT_MARKET @ $${liveTpPrice.toFixed(2)} (#${tpRes.orderId})`, symbol);
                     }
                   }
                 }
@@ -3373,6 +3854,25 @@ class TradingEngine {
             }
           } catch (err: any) {
             const errMsg = err?.message || String(err);
+            // A missing/unsupported symbol is a configuration fact, not a transient error: mark it
+            // unavailable once and stop re-scanning it instead of logging every 2 minutes forever.
+            if (err?.invalidSymbol) {
+              const existing = this.symbolExchangeRules.get(symbol);
+              if (!existing || existing.available !== false) {
+                this.symbolExchangeRules.set(symbol, {
+                  ...(existing || this.getSymbolRules(symbol)),
+                  available: false,
+                  note: `币安 /fapi 无此合约行情 (${errMsg.slice(0, 80)})`,
+                });
+                this.addLog(
+                  'warn',
+                  'API',
+                  `⏭️ [${symbol}] 币安合约行情不可用，已自动停用该币种扫描与下单（绝不使用本地模拟行情替代）`,
+                  symbol
+                );
+              }
+              continue;
+            }
             const symKey = `err_${symbol}_${interval}`;
             const lastLogged = this.lastArbitrageExecTime.get(symKey) || 0;
             if (Date.now() - lastLogged > 120_000) {
@@ -3524,13 +4024,22 @@ class TradingEngine {
                   if (res?.executedQty && res.executedQty > 0) fillQty = res.executedQty;
 
                   const closeSide = leg.side === 'LONG' ? 'SELL' : 'BUY';
+                  // Validate/derive the stop against the REAL fill price, not the pre-fill scan
+                  // price: a stop on the wrong side of the market is rejected by Binance (-2021)
+                  // and used to trigger the "opened then instantly closed" loop.
+                  let slPrice = leg.sl;
+                  if (!(leg.side === 'LONG' ? slPrice < fillPrice * 0.999 : slPrice > fillPrice * 1.001)) {
+                    const safeSl = this.computeSafeStopPrice(leg.side, fillPrice, fillPrice);
+                    if (safeSl) slPrice = safeSl;
+                  }
                   const slRes = await this.placeBinanceConditionalOrder(
                     leg.sym,
                     closeSide,
                     'STOP_MARKET',
-                    leg.sl,
+                    slPrice,
                     fillQty,
-                    leg.side
+                    leg.side,
+                    fillPrice
                   );
                   slOrderId = slRes?.orderId;
                   if (!slOrderId) {
@@ -3538,15 +4047,23 @@ class TradingEngine {
                     this.addLog('error', 'API', `🚨 [套利单止损挂单失败急平] ${leg.sym} 止损单未成功，已紧急平仓`, leg.sym);
                     continue;
                   }
+                  let tpPrice = leg.tp;
+                  if (!(leg.side === 'LONG' ? tpPrice > fillPrice * 1.001 : tpPrice < fillPrice * 0.999)) {
+                    const safeTp = this.computeSafeTakeProfitPrice(leg.side, fillPrice, fillPrice);
+                    if (safeTp) tpPrice = safeTp;
+                  }
                   const tpRes = await this.placeBinanceConditionalOrder(
                     leg.sym,
                     closeSide,
                     'TAKE_PROFIT_MARKET',
-                    leg.tp,
+                    tpPrice,
                     fillQty,
-                    leg.side
+                    leg.side,
+                    fillPrice
                   );
                   tpOrderId = tpRes?.orderId;
+                  leg.sl = slPrice;
+                  leg.tp = tpPrice;
                 }
 
                 if (!hasKeys) {
@@ -3646,7 +4163,12 @@ class TradingEngine {
 
       // Update Equity & Equity History strictly from LIVE synced balance or PAPER simulation
       if (hasKeys) {
-        await this.syncLiveAccountNow(false);
+        // The dedicated 5s live-sync loop already refreshes account/positions; only nudge it when
+        // it has gone stale. Calling a full sync here as well doubled the signed-request weight
+        // on every 10s cycle and pushed the IP over Binance's 2400/min limit.
+        if (Date.now() - this.positionsSyncedAt > 6_000) {
+          await this.syncLiveAccountNow(false);
+        }
       } else {
         let totalUnrealizedPnl = 0;
         for (const pos of this.activePositions) {
@@ -3676,114 +4198,205 @@ class TradingEngine {
     }
   }
 
-  private async closePosition(pos: ActivePosition, exitPrice: number, exitReason: ExitReason): Promise<boolean> {
+  /**
+   * Close a position.
+   *
+   * The previous version skipped the market order for `STOP_LOSS` / `TAKE_PROFIT` because it
+   * assumed "the exchange conditional order must have filled". With a driven-from-scan price that
+   * assumption was wrong: the local trigger fired while the real position was untouched, and the
+   * only order that ran was `cancelAllBinanceOrders` — deleting the real protection. The position
+   * then lived on un-tracked and the engine "re-adopted" it 5s later, forever.
+   *
+   * Now: verify the real exchange quantity, send a reducing market order whenever anything is
+   * still open, reconcile the result against real fills, and only then mutate local state.
+   */
+  private async closePosition(
+    pos: ActivePosition,
+    exitPrice: number,
+    exitReason: ExitReason
+  ): Promise<boolean> {
+    const isLive = !pos.isPaper && this.hasApiCredentials();
     let resolvedExitPrice = exitPrice;
-    if (pos.isPaper === false && this.hasApiCredentials()) {
-      try {
-        // 1. 如果是策略平仓或手动平仓，发送市价平仓单并读取真实成交均价
-        if (exitReason !== 'STOP_LOSS' && exitReason !== 'TAKE_PROFIT') {
+    let record: BotTradeRecord | null = null;
+    /** Set ONLY when our own market order really executed (real avgPrice from Binance). */
+    let executedClosePrice: number | null = null;
+
+    if (isLive) {
+      const retryAt = this.closeRetryAfter.get(pos.symbol) ?? 0;
+      if (Date.now() < retryAt) {
+        return false; // cooling down after repeated rejections; do not spam the exchange
+      }
+      const exchangeQty = await this.getExchangePositionQty(pos.symbol, pos.side);
+      if (exchangeQty === null) {
+        this.registerCloseFailure(pos.symbol);
+        this.addLog(
+          'error',
+          'API',
+          `⚠️ [平仓中止] ${pos.symbol} 无法读取交易所持仓，本地记录已保留并等待下次重试（绝不盲目删除仓位记录）`,
+          pos.symbol
+        );
+        return false;
+      }
+
+      if (exchangeQty > 0) {
+        try {
           const closeRes = await this.placeBinanceMarketOrder(
             pos.symbol,
             pos.side === 'LONG' ? 'SELL' : 'BUY',
-            pos.quantity,
+            exchangeQty,
             true,
             pos.side
           );
           if (closeRes?.avgPrice && closeRes.avgPrice > 0) {
             resolvedExitPrice = closeRes.avgPrice;
+            executedClosePrice = closeRes.avgPrice;
           }
-        }
-
-        // 2. 撤销币安交易所挂着的对应条件单（防止平仓后残留挂单导致反向开仓）
-        await this.cancelAllBinanceOrders(pos.symbol);
-      } catch (err: any) {
-        const errMsg = String(err?.message || err);
-        const alreadyClosedOnExchange = errMsg.includes('-2022') || errMsg.toLowerCase().includes('reduceonly');
-        this.addLog('error', 'API', `币安实盘平仓异常: ${errMsg}`, pos.symbol);
-
-        if (!alreadyClosedOnExchange) {
-          // Verify against Binance live positions before mutating local state so we NEVER drop an open live trade!
-          await this.syncBinanceAccountAndPositions(false);
-          const stillOpenOnExchange = this.activePositions.some(
-            (p) => !p.isPaper && p.symbol === pos.symbol && p.side === pos.side
-          );
-          if (stillOpenOnExchange) {
+        } catch (err: any) {
+          const e = err as BinanceApiError;
+          const alreadyFlat =
+            e?.code === -2022 ||
+            e?.code === -4046 ||
+            /reduceonly|no position|position is zero/i.test(String(e?.message || ''));
+          if (!alreadyFlat) {
+            this.registerCloseFailure(pos.symbol);
             this.addLog(
               'error',
               'API',
-              `⚠️ [${pos.symbol} ${pos.side}] 交易所平仓指令失败且持仓仍存在，已保留实盘持仓监控并等待下次重试！`,
+              `❌ [币安实盘平仓失败] ${pos.symbol} (${pos.side}): ${e?.message || e}｜本地记录已保留，下个周期重试`,
               pos.symbol
             );
             return false;
           }
+          resolvedExitPrice = pos.currentPrice || exitPrice;
         }
+      } else {
+        // Already flat (exchange-side SL/TP filled). Keep the mark price as a placeholder; the
+        // fill reconciliation below replaces it with the real execution price when available.
+        resolvedExitPrice = pos.currentPrice || exitPrice;
+      }
+
+      // Never synthesise a close from the mark price: only pass a fallback when our own market
+      // order actually executed.
+      record = await this.tryResolveClosedFill(
+        pos,
+        executedClosePrice ?? undefined,
+        exitReason
+      );
+
+      // Confirm the exchange is really flat BEFORE removing protective orders. The record is built
+      // from fills when they cover the position; when it had to fall back to the order's avgPrice
+      // (partial fill / fills not indexed yet) we double-check the residual size, because stripping
+      // the stop from a still-open position is far worse than a delayed bookkeeping entry.
+      const usedFallbackRecord = Boolean(record && record.id.startsWith('pos_'));
+      if (executedClosePrice !== null && usedFallbackRecord) {
+        const remainingQty = await this.getExchangePositionQty(pos.symbol, pos.side);
+        if (remainingQty === null) {
+          this.registerCloseFailure(pos.symbol);
+          this.addLog(
+            'error',
+            'API',
+            `⚠️ [平仓校验失败] ${pos.symbol} 无法确认是否已空仓，已保留交易所止损/止盈单与本地记录`,
+            pos.symbol
+          );
+          return false;
+        }
+        if (remainingQty > 0) {
+          this.registerCloseFailure(pos.symbol);
+          this.addLog(
+            'error',
+            'API',
+            `⚠️ [平仓未完全成交] ${pos.symbol} 仍持有 ${remainingQty}，已保留保护单与本地记录，下个周期继续平仓`,
+            pos.symbol
+          );
+          return false;
+        }
+      }
+
+      // Protection is only removed once the position is confirmed flat.
+      await this.cancelAllBinanceOrders(pos.symbol, true).catch(() => {});
+    }
+
+    if (isLive && !record) {
+      this.activePositions = this.activePositions.filter((p) => p.id !== pos.id);
+      this.clearCloseFailure(pos.symbol);
+      this.addLog(
+        'warn',
+        'ORDER',
+        `⚠️ [平仓完成但无交割流水] ${pos.symbol} (${pos.side}) 已在交易所平仓，但未取到成交回执，本笔不写入盈亏（避免污染统计）`,
+        pos.symbol
+      );
+      await this.syncLiveAccountNow(false).catch(() => {});
+      return true;
+    }
+
+    // Paper / fallback record (no exchange involvement).
+    if (!record) {
+      const exitNotional = pos.quantity * resolvedExitPrice;
+      const exitFee = exitNotional * (exitReason === 'TAKE_PROFIT' ? 0.0002 : 0.0005);
+      const grossPnl =
+        pos.side === 'LONG'
+          ? (resolvedExitPrice - pos.entryPrice) * pos.quantity
+          : (pos.entryPrice - resolvedExitPrice) * pos.quantity;
+      const netPnl = exitReason === 'LIQUIDATION' ? -pos.marginUsed : grossPnl - exitFee;
+      const pnlPercent = pos.marginUsed > 0 ? (netPnl / pos.marginUsed) * 100 : 0;
+      const peakPnl = pos.peakPnlUsdt || 0;
+      const priceDeltaPercent =
+        Math.abs((resolvedExitPrice - pos.entryPrice) / Math.max(1e-8, pos.entryPrice)) * 100;
+      let volatilityLevel: 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME' = 'NORMAL';
+      if (priceDeltaPercent >= 3.0) volatilityLevel = 'EXTREME';
+      else if (priceDeltaPercent >= 1.8) volatilityLevel = 'HIGH';
+      else if (priceDeltaPercent < 0.9) volatilityLevel = 'LOW';
+
+      record = {
+        id: pos.id,
+        symbol: pos.symbol,
+        interval: pos.interval,
+        side: pos.side,
+        patternType: pos.patternType,
+        patternName: pos.patternName,
+        entryTime: pos.entryTime,
+        exitTime: Date.now(),
+        entryPrice: pos.entryPrice,
+        exitPrice: resolvedExitPrice,
+        quantity: pos.quantity,
+        leverage: pos.leverage,
+        marginUsed: pos.marginUsed,
+        netPnl,
+        pnlPercent,
+        peakPnlUsdt: peakPnl,
+        reversionUsdt: peakPnl > 0 ? Math.max(0, peakPnl - netPnl) : 0,
+        volatilityLevel,
+        exitReason,
+        strategyUsed: pos.strategyUsed,
+        isPaper: pos.isPaper,
+      };
+
+      if (pos.isPaper) {
+        this.balance += pos.marginUsed + netPnl;
+        this.equity = this.balance;
       }
     }
 
-    const exitNotional = pos.quantity * resolvedExitPrice;
-    const exitFee = exitNotional * (exitReason === 'TAKE_PROFIT' ? 0.0002 : 0.0005);
-    let grossPnl = 0;
-    if (pos.side === 'LONG') {
-      grossPnl = (resolvedExitPrice - pos.entryPrice) * pos.quantity;
-    } else {
-      grossPnl = (pos.entryPrice - resolvedExitPrice) * pos.quantity;
-    }
-
-    let netPnl = grossPnl - exitFee;
-    if (exitReason === 'LIQUIDATION') {
-      netPnl = -pos.marginUsed;
-    }
-
-    const pnlPercent = pos.marginUsed > 0 ? (netPnl / pos.marginUsed) * 100 : 0;
-    if (pos.isPaper) {
-      this.balance += pos.marginUsed + netPnl;
-      this.equity = this.balance;
-    } else if (this.hasApiCredentials()) {
-      await this.syncBinanceAccountAndPositions(true);
-    }
-
-    const peakPnl = pos.peakPnlUsdt || 0;
-    const reversionUsdt = peakPnl > 0 ? Math.max(0, peakPnl - netPnl) : 0;
-    const priceDeltaPercent = Math.abs((resolvedExitPrice - pos.entryPrice) / Math.max(1e-8, pos.entryPrice)) * 100;
-    let volatilityLevel: 'LOW' | 'NORMAL' | 'HIGH' | 'EXTREME' = 'NORMAL';
-    if (priceDeltaPercent >= 3.0) volatilityLevel = 'EXTREME';
-    else if (priceDeltaPercent >= 1.8) volatilityLevel = 'HIGH';
-    else if (priceDeltaPercent < 0.9) volatilityLevel = 'LOW';
-
-    const tradeRecord: BotTradeRecord = {
-      id: pos.id,
-      symbol: pos.symbol,
-      interval: pos.interval,
-      side: pos.side,
-      patternType: pos.patternType,
-      patternName: pos.patternName,
-      entryTime: pos.entryTime,
-      exitTime: Date.now(),
-      entryPrice: pos.entryPrice,
-      exitPrice: resolvedExitPrice,
-      quantity: pos.quantity,
-      leverage: pos.leverage,
-      marginUsed: pos.marginUsed,
-      netPnl,
-      pnlPercent,
-      peakPnlUsdt: peakPnl,
-      reversionUsdt,
-      volatilityLevel,
-      exitReason,
-      strategyUsed: pos.strategyUsed,
-      isPaper: pos.isPaper,
-    };
-
-    if (pos.isPaper || this.closedTrades.every((t) => t.id !== pos.id)) {
-      this.closedTrades.push(tradeRecord);
+    if (this.closedTrades.every((t) => t.id !== record!.id)) {
+      this.closedTrades.push(record);
+      this.closedTrades = this.closedTrades.slice(-200);
     }
     this.activePositions = this.activePositions.filter((p) => p.id !== pos.id);
-    this.updatePatternLearning(tradeRecord);
+    if (isLive) this.clearCloseFailure(pos.symbol);
+    this.updatePatternLearning(record);
+
+    if (isLive) {
+      // Refresh equity from the exchange AFTER the local record is gone, so the sync cannot
+      // double-book this close through its own "position disappeared" branch.
+      await this.syncLiveAccountNow(false).catch(() => {});
+    }
 
     this.addLog(
-      netPnl >= 0 ? 'success' : 'warn',
+      record.netPnl >= 0 ? 'success' : 'warn',
       'ORDER',
-      `✔ [${pos.symbol} ${pos.interval}] ${pos.isPaper ? '模拟' : '实盘'}平仓: ${pos.side} (${pos.patternName}) @ ${resolvedExitPrice} USDT | 原因: ${exitReason} | 净损益: ${netPnl >= 0 ? '+' : ''}${netPnl.toFixed(2)} USDT (${pnlPercent >= 0 ? '+' : ''}${pnlPercent.toFixed(2)}%)`,
+      `✔ [${pos.symbol} ${pos.interval}] ${pos.isPaper ? '模拟' : '实盘'}平仓: ${pos.side} (${pos.patternName}) @ ${record.exitPrice} USDT | 原因: ${exitReason} | 净损益: ${
+        record.netPnl >= 0 ? '+' : ''
+      }${record.netPnl.toFixed(2)} USDT (${record.pnlPercent >= 0 ? '+' : ''}${record.pnlPercent.toFixed(2)}%)`,
       pos.symbol
     );
     return true;
