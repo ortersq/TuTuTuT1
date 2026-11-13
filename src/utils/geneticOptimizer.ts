@@ -26,8 +26,11 @@ export function runGeneticOptimizer(klines: Kline[]): GeneticOptimizerResult {
     trailingCallback: number
   ): GeneticGenome => {
     // Deterministic simulation heuristic based on K-line volatility & trend
-    const n = klines.length || 100;
-    const volatilityFactor = n > 0 ? (klines[n - 1].high - klines[n - 1].low) / (klines[n - 1].close || 1) : 0.02;
+    const lastCandle = Array.isArray(klines) && klines.length > 0 ? klines[klines.length - 1] : null;
+    const volatilityFactor =
+      lastCandle && Number.isFinite(lastCandle.high) && Number.isFinite(lastCandle.low) && lastCandle.close > 0
+        ? (lastCandle.high - lastCandle.low) / lastCandle.close
+        : 0.02;
 
     // Fast EMA / Slow EMA ratio impact
     const emaSpread = emaSlow - emaFast;

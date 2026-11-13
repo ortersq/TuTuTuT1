@@ -123,11 +123,16 @@ export function aggregateHeatmapData(
   const realTradesMap = new Map<string, BotTradeRecord[]>();
 
   for (const trade of filteredTrades) {
-    const tradeDate = new Date(trade.entryTime || trade.exitTime);
+    if (!trade) continue;
+    const rawTime = Number(trade.entryTime || trade.exitTime || Date.now());
+    const tradeDate = new Date(Number.isFinite(rawTime) ? rawTime : Date.now());
+    if (isNaN(tradeDate.getTime())) continue;
     let h = (tradeDate.getUTCHours() + timezoneOffsetHours) % 24;
     if (h < 0) h += 24;
 
-    const vol: VolatilityLevel = trade.volatilityLevel || 'NORMAL';
+    const vol: VolatilityLevel = VOLATILITY_LEVELS.includes(trade.volatilityLevel as VolatilityLevel)
+      ? (trade.volatilityLevel as VolatilityLevel)
+      : 'NORMAL';
     const key = `${h}_${vol}`;
     if (!realTradesMap.has(key)) {
       realTradesMap.set(key, []);

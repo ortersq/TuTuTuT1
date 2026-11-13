@@ -2,7 +2,18 @@ import React from 'react';
 import { BotStatus } from '../server/botEngine';
 import { TimeframeDiagnosticModule } from './TimeframeDiagnosticModule';
 import { PatternLearningItem } from '../types/trading';
-import { Brain, Cpu, TrendingUp, ShieldCheck, Zap, Award, BarChart3, AlertCircle, Clock, Calendar } from 'lucide-react';
+import {
+  ResponsiveContainer,
+  ComposedChart,
+  Area,
+  Line,
+  XAxis,
+  YAxis,
+  Tooltip,
+  CartesianGrid,
+  ReferenceLine,
+} from 'recharts';
+import { Brain, Cpu, TrendingUp, Zap, Award, AlertCircle, Clock, Calendar, Sparkles } from 'lucide-react';
 
 interface SelfLearningDashboardProps {
   status: BotStatus | null;
@@ -11,6 +22,7 @@ interface SelfLearningDashboardProps {
 export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ status }) => {
   const stats: PatternLearningItem[] = status?.patternLearningStats || [];
   const generation = status?.learningGeneration ?? 1;
+  const forecast = status?.aiPnlForecast;
 
   // Calculate top performing pattern
   const sortedByWeight = [...stats].sort((a, b) => b.weight - a.weight);
@@ -170,6 +182,133 @@ export const SelfLearningDashboard: React.FC<SelfLearningDashboardProps> = ({ st
           </div>
         </div>
       </div>
+
+      {/* AI 24-Hour PnL Forecast Model */}
+      {forecast && (
+        <div className="bg-[#0e131f] border border-cyan-500/30 rounded-xl p-5 space-y-4 shadow-lg">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2.5">
+              <Sparkles className="w-5 h-5 text-cyan-400" />
+              <div>
+                <h3 className="text-sm font-bold text-white">
+                  AI 24小时收益预测模型 (AI 24h PnL Trajectory Forecast & Strategy Advisor)
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  融合当前持仓 Delta、指数近因加权交易期望与多周期高质量信号密度，预测未来 24 小时预期净值增长轨迹与置信区间
+                </p>
+              </div>
+            </div>
+            <span className="px-2.5 py-1 rounded-full text-[11px] font-bold bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">
+              {forecast.regimeLabel}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3">
+              <div className="text-slate-400">未来 24h 预期 PnL</div>
+              <div
+                className={`text-lg font-bold font-mono mt-0.5 ${
+                  forecast.expected24hPnlUsdt >= 0 ? 'text-emerald-400' : 'text-rose-400'
+                }`}
+              >
+                {forecast.expected24hPnlUsdt >= 0 ? '+' : ''}${forecast.expected24hPnlUsdt.toFixed(2)} USDT
+              </div>
+            </div>
+            <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3">
+              <div className="text-slate-400">预期 24h 收益率</div>
+              <div className="text-lg font-bold font-mono text-amber-300 mt-0.5">
+                {forecast.expected24hReturnPercent >= 0 ? '+' : ''}{forecast.expected24hReturnPercent.toFixed(2)}%
+              </div>
+            </div>
+            <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3">
+              <div className="text-slate-400">预测胜率 (Projected WR)</div>
+              <div className="text-lg font-bold font-mono text-cyan-300 mt-0.5">
+                {forecast.projectedWinRatePercent.toFixed(1)}%
+              </div>
+            </div>
+            <div className="bg-slate-950/70 border border-slate-800 rounded-lg p-3">
+              <div className="text-slate-400">模型置信度</div>
+              <div className="text-lg font-bold font-mono text-emerald-300 mt-0.5">
+                {forecast.confidencePercent}%
+              </div>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 lg:grid-cols-3 gap-5 items-start">
+            <div className="lg:col-span-2 h-64 bg-slate-950/60 border border-slate-800 rounded-xl p-3">
+              <ResponsiveContainer width="100%" height="100%">
+                <ComposedChart data={forecast.trajectoryPoints} margin={{ top: 10, right: 18, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1e293b" opacity={0.6} />
+                  <XAxis dataKey="timeLabel" stroke="#64748b" tick={{ fill: '#94a3b8', fontSize: 11 }} />
+                  <YAxis stroke="#06b6d4" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={(v: number) => `$${v.toFixed(0)}`} />
+                  <Tooltip
+                    contentStyle={{
+                      backgroundColor: '#0b0e14',
+                      borderColor: '#334155',
+                      borderRadius: '8px',
+                      fontSize: '12px',
+                    }}
+                  />
+                  <ReferenceLine y={0} stroke="#475569" strokeDasharray="3 3" />
+                  <Area
+                    type="monotone"
+                    dataKey="optimisticPnl"
+                    name="乐观上轨 (USDT)"
+                    stroke="none"
+                    fill="#10b981"
+                    fillOpacity={0.14}
+                    isAnimationActive={false}
+                  />
+                  <Area
+                    type="monotone"
+                    dataKey="pessimisticPnl"
+                    name="保守下轨 (USDT)"
+                    stroke="none"
+                    fill="#f43f5e"
+                    fillOpacity={0.1}
+                    isAnimationActive={false}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="predictedCumulativePnl"
+                    name="AI 预期累积 PnL (USDT)"
+                    stroke="#06b6d4"
+                    strokeWidth={2.5}
+                    dot={{ r: 3, fill: '#06b6d4' }}
+                    isAnimationActive={false}
+                  />
+                </ComposedChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div className="space-y-2.5">
+              <div className="text-xs font-bold text-slate-200">AI 自动化调优建议方向</div>
+              {forecast.adjustmentSuggestions.map((sug, idx) => (
+                <div
+                  key={idx}
+                  className={`p-3 rounded-lg border text-xs space-y-1 ${
+                    sug.priority === 'HIGH'
+                      ? 'bg-amber-500/10 border-amber-500/40'
+                      : 'bg-slate-900/70 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between">
+                    <span className="font-bold text-slate-100">{sug.title}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-mono font-bold ${
+                        sug.priority === 'HIGH' ? 'bg-amber-500/20 text-amber-300' : 'bg-slate-800 text-cyan-300'
+                      }`}
+                    >
+                      {sug.priority}
+                    </span>
+                  </div>
+                  <p className="text-[11px] text-slate-400 leading-relaxed">{sug.detail}</p>
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Timeframe Volatility Diagnostic Module */}
       <TimeframeDiagnosticModule report={status?.timeframeDiagnostic} />

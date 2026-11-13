@@ -61,6 +61,8 @@ export type ExitReason =
   | 'PATTERN_INVALIDATED'
   | 'MOMENTUM_DECAY_TIMEOUT'
   | 'BREAKEVEN_STOP'
+  | 'BASKET_NET_TAKE_PROFIT'
+  | 'MANUAL_CLOSE_ALL'
   | 'LIQUIDATION'
   | 'END_OF_DATA';
 
@@ -95,6 +97,7 @@ export interface RiskManagementConfig {
   autoBreakevenDynamicPercent?: number;
   autoBreakevenUsdt?: number;
   notification?: NotificationConfig;
+  portfolioBasket?: PortfolioBasketConfig;
 
   sizingMode: PositionSizeMode;
   positionSizePercent: number;
@@ -425,3 +428,159 @@ export interface BacktestResult {
   };
   audit?: DataSourceAudit;
 }
+
+export type StrategyScreenerGrade = 'A' | 'B' | 'C' | 'D' | 'F';
+
+export interface StrategyScreenerItem {
+  strategyKey: StrategyKey | string;
+  strategyName: string;
+  category: string;
+  tradesCount7d: number;
+  wins7d: number;
+  losses7d: number;
+  winRatePercent: number;
+  profitFactor: number;
+  maxDrawdownPercent: number;
+  totalNetPnlUsdt: number;
+  score: number;
+  grade: StrategyScreenerGrade;
+  status: 'ACTIVE_ELITE' | 'ACTIVE_PASS' | 'ELIMINATED_BELOW_C';
+  reason: string;
+}
+
+export interface AiPnlForecastPoint {
+  hourOffset: number;
+  timeLabel: string;
+  predictedCumulativePnl: number;
+  optimisticPnl: number;
+  pessimisticPnl: number;
+}
+
+export interface AiPnlForecastResult {
+  generatedAt: number;
+  expected24hPnlUsdt: number;
+  expected24hReturnPercent: number;
+  confidencePercent: number;
+  projectedWinRatePercent: number;
+  regimeLabel: string;
+  trajectoryPoints: AiPnlForecastPoint[];
+  adjustmentSuggestions: {
+    title: string;
+    detail: string;
+    priority: 'HIGH' | 'MEDIUM' | 'LOW';
+  }[];
+}
+
+export interface ArbitrageOpportunity {
+  id: string;
+  pairName: string;
+  symbolA: string;
+  symbolB: string;
+  strongSymbol: string;
+  weakSymbol: string;
+  correlation: number;
+  spreadZScore: number;
+  halfLifeBars: number;
+  reversionSpeedLabel: string;
+  optimalEntryZScore: number;
+  expectedReversionPercent: number;
+  recommendedAction: 'LONG_WEAK_SHORT_STRONG' | 'MONITORING' | 'ACTIVE_PAIR_HEDGE';
+  reason: string;
+  isActionable: boolean;
+  timestamp: number;
+}
+
+export interface PortfolioWeightItem {
+  symbol: string;
+  targetWeightPercent: number;
+  volatilityPct: number;
+  regimeRole: 'CORE_LEADER' | 'DEFENSIVE_HEDGE' | 'ALPHA_SATELLITE';
+  sizingMultiplier: number;
+}
+
+export interface PortfolioAllocationState {
+  vixLikeIndex: number;
+  volatilityRegime: 'EXTREME_DEFENSE' | 'HIGH_CAUTION' | 'NORMAL_BALANCED' | 'LOW_VOL_EXPANSION';
+  totalExposureMultiplier: number;
+  maxConcurrentPositions: number;
+  coverageDescription: string;
+  weights: PortfolioWeightItem[];
+  lastUpdated: number;
+}
+
+export interface SymbolExchangeRules {
+  symbol: string;
+  available: boolean;
+  pricePrecision: number;
+  quantityPrecision: number;
+  tickSize: number;
+  stepSize: number;
+  minQty: number;
+  minNotional: number;
+  note?: string;
+}
+
+export interface LiveAccountSyncInfo {
+  syncedAt: number;
+  syncOk: boolean;
+  errorMessage?: string;
+  walletBalance: number;
+  availableBalance: number;
+  marginBalance: number;
+  unrealizedProfit: number;
+  positionInitialMargin?: number;
+  openPositionsCount?: number;
+  equitySource?: 'BINANCE_LIVE_API' | 'PAPER_SIMULATION';
+}
+
+export interface PortfolioBasketConfig {
+  enabled: boolean;
+  minNetProfitPercent: number;
+  minNetProfitUsdt: number;
+  takerFeeRate: number;
+  slippageBufferRate: number;
+  trailingRetracePercent: number;
+  cooldownMinutes: number;
+}
+
+export interface PortfolioBasketState {
+  enabled: boolean;
+  positionsCount: number;
+  winningCount: number;
+  losingCount: number;
+  totalMarginUsed: number;
+  totalNotional: number;
+  grossUnrealizedPnl: number;
+  estimatedRoundTripFees: number;
+  estimatedSlippageBuffer: number;
+  netRealizablePnl: number;
+  netReturnOnMarginPercent: number;
+  peakNetRealizablePnl: number;
+  isTrailingActive: boolean;
+  regimeAssessment: 'RANGE_LOCK' | 'TREND_HOLD' | 'TREND_TRAILING_EXIT' | 'RISK_DEFENSE_EXIT' | 'NO_ACTION';
+  shouldCloseAll: boolean;
+  decisionReason: string;
+  cooldownActiveUntil: number | null;
+  lastEvaluatedAt: number;
+}
+
+export interface LiveAccountRiskMetrics {
+  totalEquity: number;
+  walletBalance: number;
+  availableBalance: number;
+  totalMarginUsed: number;
+  marginUtilizationPercent: number;
+  freeMarginBufferPercent: number;
+  totalUnrealizedPnl: number;
+  drawdownPercent: number;
+  maxAllowedDrawdownPercent: number;
+  isDrawdownLocked: boolean;
+  isHedgeMode: boolean;
+  riskPerTradePercent: number;
+  maxSingleTradeRiskUsdt: number;
+  lockedSymbols: string[];
+  dataSource: 'BINANCE_LIVE_API' | 'PAPER_SIMULATION';
+}
+
+
+

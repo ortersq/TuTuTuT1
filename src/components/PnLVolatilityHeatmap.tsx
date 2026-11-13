@@ -37,7 +37,7 @@ interface PnLVolatilityHeatmapProps {
 
 export const PnLVolatilityHeatmap: React.FC<PnLVolatilityHeatmapProps> = ({
   closedTrades = [],
-  monitoredSymbols = ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'],
+  monitoredSymbols = ['BTCUSDT', 'ETHUSDT', 'XAUUSDT', 'NVDAUSDT', 'CLUSDT'],
 }) => {
   const [selectedSymbol, setSelectedSymbol] = useState<string>('ALL');
   const [selectedInterval, setSelectedInterval] = useState<string>('ALL');

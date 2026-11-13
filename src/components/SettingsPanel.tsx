@@ -14,7 +14,11 @@ import {
   Info,
   ShieldCheck,
   Sparkles,
+  AlertCircle,
+  Layers,
+  Lock,
 } from 'lucide-react';
+import { LOCKED_TARGET_SYMBOLS } from '../utils/riskAndExecution';
 
 interface SettingsPanelProps {
   status: BotStatus | null;
@@ -42,16 +46,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [isSavingKeys, setIsSavingKeys] = useState<boolean>(false);
   const [keySuccessMsg, setKeySuccessMsg] = useState<string | null>(null);
 
-  // Symbol input state
-  const [customSymbolInput, setCustomSymbolInput] = useState<string>('');
-  const [isAddingSymbol, setIsAddingSymbol] = useState<boolean>(false);
+  // Symbol management strictly locked to core 5 contracts
 
   // Timeframe and leverage state
-  const monitoredSymbols = status?.monitoredSymbols || ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+  const monitoredSymbols = status?.monitoredSymbols || [...LOCKED_TARGET_SYMBOLS];
   const [selectedTimeframes, setSelectedTimeframes] = useState<string[]>(
     status?.monitoredTimeframes || ['5m', '15m', '30m']
   );
   const [leverage, setLeverage] = useState<number>(status?.leverage || 5);
+  const [positionSizePercent, setPositionSizePercent] = useState<number>(
+    status?.riskConfig?.positionSizePercent ?? 20
+  );
+  const [riskPerTradePercent, setRiskPerTradePercent] = useState<number>(
+    status?.riskConfig?.riskPerTradePercent ?? 2.0
+  );
+  const [maxAllowedDrawdownPercent, setMaxAllowedDrawdownPercent] = useState<number>(
+    status?.riskConfig?.maxAllowedDrawdownPercent ?? 20
+  );
   const [savedSuccess, setSavedSuccess] = useState<boolean>(false);
 
   // Trailing stop loss configuration state
@@ -73,31 +84,48 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   );
   const [trailingSavedSuccess, setTrailingSavedSuccess] = useState<boolean>(false);
 
+  // Portfolio Basket Take-Profit configuration state
+  const currentBasket = currentRisk?.portfolioBasket;
+  const [basketEnabled, setBasketEnabled] = useState<boolean>(currentBasket?.enabled ?? true);
+  const [basketMinNetPct, setBasketMinNetPct] = useState<number>(
+    currentBasket?.minNetProfitPercent ?? 1.5
+  );
+  const [basketMinNetUsdt, setBasketMinNetUsdt] = useState<number>(
+    currentBasket?.minNetProfitUsdt ?? 1.0
+  );
+  const [basketTrailingRetracePct, setBasketTrailingRetracePct] = useState<number>(
+    currentBasket?.trailingRetracePercent ?? 30
+  );
+  const [basketCooldownMins, setBasketCooldownMins] = useState<number>(
+    currentBasket?.cooldownMinutes ?? 20
+  );
+  const [basketSavedSuccess, setBasketSavedSuccess] = useState<boolean>(false);
+
   // Sync state if status updates
   useEffect(() => {
+    if (status?.leverage) {
+      setLeverage(status.leverage);
+    }
     if (status?.riskConfig) {
+      setPositionSizePercent(status.riskConfig.positionSizePercent ?? 20);
+      setRiskPerTradePercent(status.riskConfig.riskPerTradePercent ?? 2.0);
+      setMaxAllowedDrawdownPercent(status.riskConfig.maxAllowedDrawdownPercent ?? 20);
       setUseTrailingStop(status.riskConfig.useTrailingStop ?? true);
       setTrailingActivationPercent(status.riskConfig.trailingActivationPercent ?? 0.8);
       setTrailingCallbackPercent(status.riskConfig.trailingCallbackPercent ?? 0.45);
       setTrailingStepPercent(status.riskConfig.trailingStepPercent ?? 0.5);
       setTrailingActivationUsdt(status.riskConfig.trailingActivationUsdt ?? 25);
+      if (status.riskConfig.portfolioBasket) {
+        setBasketEnabled(status.riskConfig.portfolioBasket.enabled ?? true);
+        setBasketMinNetPct(status.riskConfig.portfolioBasket.minNetProfitPercent ?? 1.5);
+        setBasketMinNetUsdt(status.riskConfig.portfolioBasket.minNetProfitUsdt ?? 1.0);
+        setBasketTrailingRetracePct(status.riskConfig.portfolioBasket.trailingRetracePercent ?? 30);
+        setBasketCooldownMins(status.riskConfig.portfolioBasket.cooldownMinutes ?? 20);
+      }
     }
-  }, [status?.riskConfig]);
+  }, [status?.riskConfig, status?.leverage]);
 
-  const presetSymbols = [
-    'BTCUSDT',
-    'ETHUSDT',
-    'SOLUSDT',
-    'BNBUSDT',
-    'DOGEUSDT',
-    'XRPUSDT',
-    'AVAXUSDT',
-    'PEPEUSDT',
-    'NEARUSDT',
-    'ADAUSDT',
-    'SUIUSDT',
-    'LINKUSDT',
-  ];
+  const coreFiveContracts = [...LOCKED_TARGET_SYMBOLS];
 
   const handleSaveKeys = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -105,7 +133,7 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     setKeySuccessMsg(null);
     try {
       await onSaveCredentials(apiKey, apiSecret);
-      setKeySuccessMsg('✓ 币安 API Key 已成功保存并同步应用！');
+      setKeySuccessMsg('✓ 币安 API Key 已保存！正在检验实时合约账户同步状态...');
       setApiKey('');
       setApiSecret('');
     } catch {
@@ -127,18 +155,6 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     }
   };
 
-  const handleAddSymbolSubmit = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!customSymbolInput.trim()) return;
-    setIsAddingSymbol(true);
-    try {
-      await onAddSymbol(customSymbolInput.trim());
-      setCustomSymbolInput('');
-    } finally {
-      setIsAddingSymbol(false);
-    }
-  };
-
   const toggleTimeframe = (tf: string) => {
     if (selectedTimeframes.includes(tf)) {
       if (selectedTimeframes.length === 1) return;
@@ -152,6 +168,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     onUpdateConfig({
       monitoredTimeframes: selectedTimeframes,
       leverage,
+      riskConfig: {
+        positionSizePercent,
+        riskPerTradePercent,
+        maxAllowedDrawdownPercent,
+      },
     });
     setSavedSuccess(true);
     setTimeout(() => setSavedSuccess(false), 3000);
@@ -192,6 +213,24 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     });
     setTrailingSavedSuccess(true);
     setTimeout(() => setTrailingSavedSuccess(false), 3000);
+  };
+
+  const handleSavePortfolioBasket = () => {
+    onUpdateConfig({
+      riskConfig: {
+        portfolioBasket: {
+          enabled: basketEnabled,
+          minNetProfitPercent: basketMinNetPct,
+          minNetProfitUsdt: basketMinNetUsdt,
+          takerFeeRate: 0.0005,
+          slippageBufferRate: 0.0005,
+          trailingRetracePercent: basketTrailingRetracePct,
+          cooldownMinutes: basketCooldownMins,
+        },
+      },
+    });
+    setBasketSavedSuccess(true);
+    setTimeout(() => setBasketSavedSuccess(false), 3000);
   };
 
   return (
@@ -450,21 +489,165 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
         </div>
       </div>
 
-      {/* 2. Dynamic Symbol Maintenance */}
+      {/* 1.5 Portfolio Basket Net Take-Profit Configuration */}
+      <div className="bg-[#111726] border border-emerald-500/40 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-emerald-500/10 border border-emerald-500/30 flex items-center justify-center text-emerald-400">
+              <Layers className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100">
+                组合篮子净利智能全平设置 (Portfolio Basket Take-Profit)
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                多笔持仓（如盈利单+亏损单混持）自动扣除双向吃单手续费 (0.10%) 与市价滑点缓冲 (0.05%) 后，结合震荡/趋势行情自动决定全平或顺风追踪。
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-2.5 bg-[#0b0e14] px-3 py-1.5 rounded-xl border border-slate-800">
+            <span className="text-xs font-semibold text-slate-300">自动篮子止盈:</span>
+            <button
+              type="button"
+              onClick={() => setBasketEnabled(!basketEnabled)}
+              className={`w-12 h-6 flex items-center rounded-full p-1 cursor-pointer transition-colors ${
+                basketEnabled ? 'bg-emerald-400' : 'bg-slate-700'
+              }`}
+            >
+              <div
+                className={`bg-slate-950 w-4 h-4 rounded-full shadow-md transform transition-transform ${
+                  basketEnabled ? 'translate-x-6' : 'translate-x-0'
+                }`}
+              />
+            </button>
+            <span
+              className={`text-xs font-mono font-bold ${
+                basketEnabled ? 'text-emerald-400' : 'text-slate-500'
+              }`}
+            >
+              {basketEnabled ? '已开启' : '已关闭'}
+            </span>
+          </div>
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 text-xs">
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between font-semibold text-slate-300">
+              <span>扣费后最低净收益率门槛 (占总保证金 %)</span>
+              <span className="text-emerald-400 font-mono font-bold">{basketMinNetPct.toFixed(1)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="8.0"
+              step="0.5"
+              value={basketMinNetPct}
+              onChange={(e) => setBasketMinNetPct(parseFloat(e.target.value))}
+              disabled={!basketEnabled}
+              className="w-full accent-emerald-400 cursor-pointer disabled:opacity-50"
+            />
+            <div className="text-[11px] text-slate-400">
+              只有全平并扣除开平双边手续费和滑点后，净收益 ≥ 总保证金 <strong>{basketMinNetPct.toFixed(1)}%</strong> 才触发。
+            </div>
+          </div>
+
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between font-semibold text-slate-300">
+              <span>扣费后最低绝对净利门槛 (USDT)</span>
+              <span className="text-emerald-400 font-mono font-bold">${basketMinNetUsdt.toFixed(1)} USDT</span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="30"
+              step="0.5"
+              value={basketMinNetUsdt}
+              onChange={(e) => setBasketMinNetUsdt(parseFloat(e.target.value))}
+              disabled={!basketEnabled}
+              className="w-full accent-emerald-400 cursor-pointer disabled:opacity-50"
+            />
+            <div className="text-[11px] text-slate-400">
+              小资金保底净入袋线：实得净利需同时超过 <strong>${basketMinNetUsdt.toFixed(1)} USDT</strong>，避免几毛钱频繁进出。
+            </div>
+          </div>
+
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between font-semibold text-slate-300">
+              <span>单边趋势篮子追踪回撤平仓比例</span>
+              <span className="text-amber-400 font-mono font-bold">{basketTrailingRetracePct}%</span>
+            </div>
+            <input
+              type="range"
+              min="15"
+              max="50"
+              step="5"
+              value={basketTrailingRetracePct}
+              onChange={(e) => setBasketTrailingRetracePct(parseInt(e.target.value, 10))}
+              disabled={!basketEnabled}
+              className="w-full accent-amber-400 cursor-pointer disabled:opacity-50"
+            />
+            <div className="text-[11px] text-slate-400">
+              顺势趋势单暂不全平让利润奔跑；若总净利从峰值回吐达 <strong>{basketTrailingRetracePct}%</strong>，立即整体全平锁利。
+            </div>
+          </div>
+
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between font-semibold text-slate-300">
+              <span>全平后防原地复开冷却时长</span>
+              <span className="text-cyan-400 font-mono font-bold">{basketCooldownMins} 分钟</span>
+            </div>
+            <input
+              type="range"
+              min="5"
+              max="60"
+              step="5"
+              value={basketCooldownMins}
+              onChange={(e) => setBasketCooldownMins(parseInt(e.target.value, 10))}
+              className="w-full accent-cyan-400 cursor-pointer"
+            />
+            <div className="text-[11px] text-slate-400">
+              全平后锁定 <strong>{basketCooldownMins} 分钟</strong>不再开同周期新仓，防止下一根 10 秒轮询原地反复交手续费。
+            </div>
+          </div>
+        </div>
+
+        <div className="pt-2 border-t border-slate-800 flex items-center gap-3">
+          <button
+            type="button"
+            onClick={handleSavePortfolioBasket}
+            className="px-6 py-2.5 bg-emerald-400 hover:bg-emerald-300 text-slate-950 font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-sm flex items-center gap-1.5"
+          >
+            <Check className="w-4 h-4" />
+            <span>保存并应用组合篮子全平策略</span>
+          </button>
+          {basketSavedSuccess && (
+            <span className="text-xs text-emerald-400 font-medium">
+              ✓ 组合篮子净利止盈参数已实时生效！
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* 2. Locked Core 5-Contract Maintenance */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
           <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
-            <Sliders className="w-4 h-4 text-amber-400" />
-            <span>动态监控币种维护 (支持任意币安合约)</span>
+            <Lock className="w-4 h-4 text-amber-400" />
+            <span>实盘锁定核心监控合约 (BTC / ETH / XAU / NVDA / CL)</span>
           </h3>
-          <span className="text-xs text-slate-400 font-mono">
-            当前实时监控 {monitoredSymbols.length} 个币种
+          <span className="text-xs text-amber-300 font-mono bg-amber-500/10 px-2.5 py-1 rounded-lg border border-amber-500/30">
+            白名单锁定 {monitoredSymbols.length}/5 合约
           </span>
         </div>
 
+        <p className="text-xs text-slate-400 leading-relaxed">
+          为确保实盘资金安全与相关性收敛控制，后端引擎与接口已强制锁定仅允许监控与交易核心 5 个标的目标合约，严禁非白名单合约误触发开单。
+        </p>
+
         {/* Current Active Monitored Symbols Pills */}
         <div className="space-y-2">
-          <label className="text-xs font-semibold text-slate-300">当前已添加的监控币种:</label>
+          <label className="text-xs font-semibold text-slate-300">当前激活的核心监控合约:</label>
           <div className="flex flex-wrap gap-2">
             {monitoredSymbols.map((sym) => (
               <div
@@ -472,53 +655,48 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-[#0b0e14] border border-amber-500/40 rounded-xl text-xs font-bold text-amber-300"
               >
                 <span>{sym}</span>
-                <button
-                  type="button"
-                  onClick={() => onRemoveSymbol(sym)}
-                  title="删除币种"
-                  className="text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
-                >
-                  <Trash2 className="w-3.5 h-3.5" />
-                </button>
+                {monitoredSymbols.length > 1 && (
+                  <button
+                    type="button"
+                    onClick={() => onRemoveSymbol(sym)}
+                    title="暂停监控该合约"
+                    className="text-slate-500 hover:text-rose-400 transition-colors cursor-pointer"
+                  >
+                    <Trash2 className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
             ))}
           </div>
         </div>
 
-        {/* Custom Add Symbol Form */}
-        <form onSubmit={handleAddSymbolSubmit} className="flex items-center gap-2 pt-2">
-          <input
-            type="text"
-            value={customSymbolInput}
-            onChange={(e) => setCustomSymbolInput(e.target.value)}
-            placeholder="输入币种名称 (例如: DOGEUSDT 或 PEPE)"
-            className="flex-1 px-4 py-2 bg-[#0b0e14] border border-slate-800 rounded-xl text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-400 font-mono"
-          />
-          <button
-            type="submit"
-            disabled={isAddingSymbol || !customSymbolInput.trim()}
-            className="px-4 py-2 bg-amber-400 hover:bg-amber-300 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-bold text-xs rounded-xl transition-colors flex items-center gap-1 cursor-pointer shrink-0"
-          >
-            <Plus className="w-4 h-4" />
-            <span>添加币种</span>
-          </button>
-        </form>
-
-        {/* Quick Add Presets */}
-        <div className="space-y-1.5 pt-2">
-          <label className="text-[11px] text-slate-400">一键快捷添加热门币种:</label>
-          <div className="flex flex-wrap gap-1.5">
-            {presetSymbols.map((sym) => {
+        {/* Locked Core Whitelist Toggle & Restore */}
+        <div className="space-y-2 pt-2 border-t border-slate-800/80">
+          <div className="flex flex-wrap items-center justify-between gap-2">
+            <label className="text-[11px] text-slate-400">核心 5 合约开关白名单:</label>
+            <button
+              type="button"
+              onClick={() => onUpdateConfig({ monitoredSymbols: coreFiveContracts })}
+              className="px-3 py-1 rounded-lg text-[11px] font-bold bg-amber-400/20 hover:bg-amber-400/30 text-amber-300 border border-amber-500/40 cursor-pointer"
+            >
+              ⚡ 一键锁定并激活全部 5 个目标合约
+            </button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {coreFiveContracts.map((sym) => {
               const isAdded = monitoredSymbols.includes(sym);
               return (
                 <button
                   key={sym}
                   type="button"
                   onClick={() => {
-                    if (isAdded) onRemoveSymbol(sym);
-                    else onAddSymbol(sym);
+                    if (isAdded) {
+                      if (monitoredSymbols.length > 1) onRemoveSymbol(sym);
+                    } else {
+                      onAddSymbol(sym);
+                    }
                   }}
-                  className={`px-2.5 py-1 rounded-lg text-xs font-mono transition-all cursor-pointer ${
+                  className={`px-3 py-1.5 rounded-lg text-xs font-mono font-semibold transition-all cursor-pointer ${
                     isAdded
                       ? 'bg-amber-500/20 text-amber-300 border border-amber-500/50'
                       : 'bg-[#0b0e14] text-slate-400 hover:text-slate-200 border border-slate-800'
@@ -581,6 +759,23 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             </div>
           )}
 
+          {status?.hasBinanceKeys && status?.liveSyncInfo && (
+            <div
+              className={`p-3 rounded-xl text-xs border flex items-center gap-2 ${
+                status.liveSyncInfo.syncOk
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+              }`}
+            >
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>
+                {status.liveSyncInfo.syncOk
+                  ? `✅ 交易所实盘连通验证成功！钱包余额 $${status.liveSyncInfo.walletBalance.toFixed(2)} | 可用保证金 $${status.liveSyncInfo.availableBalance.toFixed(2)} | 净值 $${status.liveSyncInfo.marginBalance.toFixed(2)}`
+                  : `⚠️ 实盘 API 校验提示: ${status.liveSyncInfo.errorMessage}`}
+              </span>
+            </div>
+          )}
+
           <div className="flex items-center gap-3">
             <button
               type="submit"
@@ -637,21 +832,83 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
           </div>
         </div>
 
-        {/* Leverage Slider */}
-        <div className="space-y-2 pt-2 border-t border-slate-800/80">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-semibold text-slate-300">杠杆倍数:</label>
-            <span className="text-sm font-bold text-amber-400 font-mono">{leverage}x 杠杆</span>
+        {/* Leverage & Live Total-Equity Risk Allocation Sliders */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4 pt-2 border-t border-slate-800/80">
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300">最大杠杆硬上限 (只降不升):</label>
+              <span className="text-sm font-bold text-amber-400 font-mono">{leverage}x</span>
+            </div>
+            <input
+              type="range"
+              min="1"
+              max="20"
+              step="1"
+              value={leverage}
+              onChange={(e) => setLeverage(parseInt(e.target.value, 10))}
+              className="w-full accent-amber-400 cursor-pointer"
+            />
+            <div className="text-[11px] text-slate-400">
+              高波动/高风险期算法只会向下减仓降杠杆，绝不突破 <strong>{leverage}x</strong> 上限。
+            </div>
           </div>
-          <input
-            type="range"
-            min="1"
-            max="20"
-            step="1"
-            value={leverage}
-            onChange={(e) => setLeverage(parseInt(e.target.value, 10))}
-            className="w-full accent-amber-400 cursor-pointer"
-          />
+
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300">单笔基础资金占用比 (占总净值):</label>
+              <span className="text-sm font-bold text-cyan-400 font-mono">{positionSizePercent}%</span>
+            </div>
+            <input
+              type="range"
+              min="5"
+              max="30"
+              step="1"
+              value={positionSizePercent}
+              onChange={(e) => setPositionSizePercent(parseInt(e.target.value, 10))}
+              className="w-full accent-cyan-400 cursor-pointer"
+            />
+            <div className="text-[11px] text-slate-400">
+              基于实盘总资产动态分配保证金，全账户保证金总占用硬顶 78%，保留 ≥22% 安全缓冲。
+            </div>
+          </div>
+
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300">单笔止损最大亏损限额 (占总净值):</label>
+              <span className="text-sm font-bold text-emerald-400 font-mono">{riskPerTradePercent.toFixed(1)}%</span>
+            </div>
+            <input
+              type="range"
+              min="0.5"
+              max="5.0"
+              step="0.2"
+              value={riskPerTradePercent}
+              onChange={(e) => setRiskPerTradePercent(parseFloat(e.target.value))}
+              className="w-full accent-emerald-400 cursor-pointer"
+            />
+            <div className="text-[11px] text-slate-400">
+              结合实时止损距离硬限制开仓手数，确保打损最大亏损不超过总资产的 <strong>{riskPerTradePercent.toFixed(1)}%</strong>。
+            </div>
+          </div>
+
+          <div className="bg-[#0b0e14] border border-slate-800 rounded-xl p-3.5 space-y-2">
+            <div className="flex items-center justify-between">
+              <label className="text-xs font-semibold text-slate-300">账户最大回撤锁仓红线 (Kill-Switch):</label>
+              <span className="text-sm font-bold text-rose-400 font-mono">{maxAllowedDrawdownPercent}%</span>
+            </div>
+            <input
+              type="range"
+              min="5"
+              max="40"
+              step="1"
+              value={maxAllowedDrawdownPercent}
+              onChange={(e) => setMaxAllowedDrawdownPercent(parseInt(e.target.value, 10))}
+              className="w-full accent-rose-400 cursor-pointer"
+            />
+            <div className="text-[11px] text-slate-400">
+              净值回撤触及 <strong>{maxAllowedDrawdownPercent}%</strong> 自动锁死停止开新仓并推送紧急预警。
+            </div>
+          </div>
         </div>
 
         <div className="pt-2 border-t border-slate-800 flex items-center gap-3">
@@ -660,10 +917,10 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             onClick={handleSaveTimeframesAndLeverage}
             className="px-6 py-2.5 bg-amber-400 hover:bg-amber-300 text-slate-950 font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-sm"
           >
-            保存周期与杠杆设置
+            保存周期、杠杆与风控红线设置
           </button>
           {savedSuccess && (
-            <span className="text-xs text-emerald-400 font-medium">✓ 配置更新成功！</span>
+            <span className="text-xs text-emerald-400 font-medium">✓ 实盘周期与仓位风控配置已生效！</span>
           )}
         </div>
       </div>

@@ -2,15 +2,20 @@ import React from 'react';
 import { BotStatus, ActivePosition, BotTradeRecord, PatternStatItem } from '../server/botEngine';
 import { ShieldAlert, TrendingUp, Sparkles, AlertCircle, CheckCircle, ShieldCheck, Flame } from 'lucide-react';
 import { LiveEquityChart } from './LiveEquityChart';
+import { PortfolioBasketPanel } from './PortfolioBasketPanel';
 
 interface PositionsAndLogsProps {
   status: BotStatus | null;
+  onSyncLive?: () => Promise<void> | void;
   onClosePosition: (symbol: string) => void;
+  onCloseAllPositions?: () => Promise<void> | void;
 }
 
 export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
   status,
+  onSyncLive,
   onClosePosition,
+  onCloseAllPositions,
 }) => {
   const activePositions = status?.activePositions || [];
   const closedTrades = status?.closedTrades || [];
@@ -30,6 +35,13 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
 
   return (
     <div className="space-y-6">
+      {/* 0. Portfolio Basket Net Take-Profit & One-Click Close All */}
+      <PortfolioBasketPanel
+        basket={status?.portfolioBasket}
+        activePositionsCount={activePositions.length}
+        onCloseAllPositions={onCloseAllPositions}
+      />
+
       {/* 1. Active Open Positions Section */}
       <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
         <div className="flex items-center justify-between border-b border-slate-800 pb-3">
@@ -134,6 +146,28 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
                   </strong>
                 </div>
 
+                {/* Exchange-level SL & TP Safety Badges */}
+                <div className="grid grid-cols-2 gap-2 text-[11px] font-mono bg-slate-900/70 border border-slate-800/80 rounded-lg p-2">
+                  <div>
+                    <span className="text-slate-400">🛡️ 止损挂单 (SL): </span>
+                    <strong className="text-rose-300">
+                      {pos.stopLossPrice ? `$${pos.stopLossPrice.toFixed(2)}` : '同步中'}
+                    </strong>
+                    {pos.stopLossOrderId && (
+                      <span className="text-[10px] text-emerald-400 ml-1">#{pos.stopLossOrderId}</span>
+                    )}
+                  </div>
+                  <div>
+                    <span className="text-slate-400">🎯 止盈挂单 (TP): </span>
+                    <strong className="text-emerald-300">
+                      {pos.takeProfitPrice ? `$${pos.takeProfitPrice.toFixed(2)}` : '移动追踪'}
+                    </strong>
+                    {pos.takeProfitOrderId && (
+                      <span className="text-[10px] text-emerald-400 ml-1">#{pos.takeProfitOrderId}</span>
+                    )}
+                  </div>
+                </div>
+
                 {/* Trailing Stop-Loss Dynamic Protection Badge */}
                 {pos.isTrailingActive && pos.trailingStopPrice && (
                   <div className="p-2 bg-emerald-500/10 border border-emerald-500/30 rounded-lg text-xs flex items-center justify-between text-emerald-300 font-mono">
@@ -155,9 +189,13 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
       {/* Live Equity & Floating PnL Curve */}
       <LiveEquityChart
         equityHistory={status?.equityHistory || []}
-        peakEquity={status?.peakEquity}
-        currentEquity={status?.equity}
-        currentBalance={status?.balance}
+        peakEquity={status?.peakEquity ?? 0}
+        currentEquity={status?.equity ?? 0}
+        currentBalance={status?.balance ?? 0}
+        hasBinanceKeys={Boolean(status?.hasBinanceKeys)}
+        liveSyncInfo={status?.liveSyncInfo}
+        activePositions={activePositions}
+        onSyncLive={onSyncLive}
       />
 
       {/* 2. Pattern Win-Rate Statistics & Auto-Optimization Leaderboard */}
@@ -177,7 +215,7 @@ export const PositionsAndLogs: React.FC<PositionsAndLogsProps> = ({
         <div className="p-3 bg-amber-500/10 border border-amber-500/30 rounded-xl text-xs text-amber-200 flex items-start gap-2">
           <AlertCircle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
           <div>
-            <strong>自动胜率筛选机制</strong>：系统在运行中会自动统计各种形态在实盘/模拟调单中的表现。若某种形态累计调单 $\ge 3$ 笔且胜率掉至 <strong>50% 以下</strong>，系统将<strong>自动防亏熔断关停该形态</strong>，防止亏损扩充，确保整体盈利目的！
+            <strong>自动胜率筛选机制</strong>：系统在运行中会自动统计各种形态在实盘/模拟调单中的表现。若某种形态累计调单 ≥ 3 笔且胜率掉至 <strong>50% 以下</strong>，系统将<strong>自动防亏熔断关停该形态</strong>，防止亏损扩充，确保整体盈利目的！
           </div>
         </div>
 

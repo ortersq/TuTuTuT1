@@ -1,6 +1,15 @@
 import React from 'react';
 import { BotStatus } from '../server/botEngine';
-import { Activity, ShieldCheck, AlertCircle, TrendingUp, ArrowDownRight, Award, Zap } from 'lucide-react';
+import {
+  Activity,
+  ShieldCheck,
+  AlertCircle,
+  TrendingUp,
+  ArrowDownRight,
+  Zap,
+  PieChart,
+  GitCompare,
+} from 'lucide-react';
 
 interface LivePerformanceMonitorProps {
   status: BotStatus | null;
@@ -12,23 +21,23 @@ interface StrategyPerformanceMetrics {
   category: string;
   totalTrades: number;
   wins: number;
-  winRate: number;
-  sharpeRatio: number;
-  maxDrawdownPercent: number;
-  profitFactor: number;
-  statusLevel: 'NORMAL_EXCELLENT' | 'NORMAL_STABLE' | 'WARNING_LOW' | 'ABNORMAL_HIGH_RISK';
+  winRate: number | null;
+  sharpeRatio: number | null;
+  maxDrawdownPercent: number | null;
+  profitFactor: number | null;
+  statusLevel: 'NORMAL_EXCELLENT' | 'NORMAL_STABLE' | 'WARNING_LOW' | 'ABNORMAL_HIGH_RISK' | 'NO_DATA';
   statusLabel: string;
 }
 
 export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ status }) => {
   const closedTrades = status?.closedTrades || [];
   const equityHistory = status?.equityHistory || [];
-  const peakEquity = status?.peakEquity || 10000;
-  const currentEquity = status?.equity || 10000;
+  const peakEquity = status?.peakEquity ?? 0;
+  const currentEquity = status?.equity ?? 0;
 
-  // 1. Calculate Overall Account Sharpe Ratio
-  const computeOverallSharpe = (): number => {
-    if (closedTrades.length < 2) return 2.15; // Baseline default for paper/initial state
+  // 1. Calculate Overall Account Sharpe Ratio (returns null if < 2 closed trades; zero fake baseline)
+  const computeOverallSharpe = (): number | null => {
+    if (closedTrades.length < 2) return null;
     const returns = closedTrades.map((t) => (t.marginUsed > 0 ? t.netPnl / t.marginUsed : 0));
     const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
     const variance =
@@ -40,13 +49,13 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
     return Number(Math.max(-3.0, Math.min(5.0, rawSharpe)).toFixed(2));
   };
 
-  // 2. Calculate Overall Max Drawdown
+  // 2. Calculate Overall Max Drawdown strictly from recorded equityHistory
   const computeOverallMaxDrawdown = (): number => {
     if (equityHistory.length < 2) {
       return peakEquity > 0 ? Number((((peakEquity - currentEquity) / peakEquity) * 100).toFixed(2)) : 0;
     }
     let maxDd = 0;
-    let runningPeak = equityHistory[0]?.equity || 10000;
+    let runningPeak = equityHistory[0]?.equity || 0;
 
     for (const point of equityHistory) {
       if (point.equity > runningPeak) {
@@ -64,7 +73,14 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
   const overallMaxDd = computeOverallMaxDrawdown();
 
   // Color & Badge for Sharpe Ratio
-  const getSharpeStatusBadge = (sharpe: number) => {
+  const getSharpeStatusBadge = (sharpe: number | null) => {
+    if (sharpe === null) {
+      return (
+        <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+          ⚪ 暂无样本 (&lt;2笔平仓)
+        </span>
+      );
+    }
     if (sharpe >= 2.0) {
       return (
         <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded text-[10px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
@@ -138,21 +154,21 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
     );
     const totalTrades = stratTrades.length;
     const wins = stratTrades.filter((t) => t.netPnl > 0).length;
-    const winRate = totalTrades > 0 ? Number(((wins / totalTrades) * 100).toFixed(1)) : 68.5;
+    const winRate = totalTrades > 0 ? Number(((wins / totalTrades) * 100).toFixed(1)) : null;
 
-    // Strategy Sharpe Ratio
-    let sharpe = 2.25;
+    // Strategy Sharpe Ratio (null when insufficient real samples)
+    let sharpe: number | null = null;
     if (totalTrades >= 2) {
       const returns = stratTrades.map((t) => (t.marginUsed > 0 ? t.netPnl / t.marginUsed : 0));
       const mean = returns.reduce((a, b) => a + b, 0) / returns.length;
       const variance =
         returns.reduce((sum, r) => sum + Math.pow(r - mean, 2), 0) / (returns.length - 1);
       const stdDev = Math.sqrt(variance);
-      if (stdDev > 0) sharpe = Number(((mean / stdDev) * Math.sqrt(252)).toFixed(2));
+      sharpe = stdDev > 0 ? Number(((mean / stdDev) * Math.sqrt(252)).toFixed(2)) : mean > 0 ? 3.5 : 0;
     }
 
     // Strategy Max Drawdown
-    let stratMaxDd = 3.2;
+    let stratMaxDd: number | null = null;
     if (totalTrades >= 2) {
       let cumPnl = 0;
       let peakPnl = 0;
@@ -163,26 +179,36 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
         const ddUsdt = peakPnl - cumPnl;
         if (ddUsdt > maxDraw) maxDraw = ddUsdt;
       }
-      stratMaxDd = Number(Math.min(35, Math.max(0, maxDraw / 10)).toFixed(1));
+      const avgMargin =
+        stratTrades.reduce((s, t) => s + Math.max(10, t.marginUsed), 0) / totalTrades;
+      stratMaxDd = Number(Math.min(100, Math.max(0, (maxDraw / Math.max(10, avgMargin)) * 100)).toFixed(1));
     }
 
     // Profit Factor
-    const grossWin = stratTrades.filter((t) => t.netPnl > 0).reduce((a, b) => a + b.netPnl, 0);
-    const grossLoss = Math.abs(stratTrades.filter((t) => t.netPnl < 0).reduce((a, b) => a + b.netPnl, 0));
-    const profitFactor = grossLoss > 0 ? Number((grossWin / grossLoss).toFixed(2)) : grossWin > 0 ? 4.5 : 2.1;
+    let profitFactor: number | null = null;
+    if (totalTrades > 0) {
+      const grossWin = stratTrades.filter((t) => t.netPnl > 0).reduce((a, b) => a + b.netPnl, 0);
+      const grossLoss = Math.abs(stratTrades.filter((t) => t.netPnl < 0).reduce((a, b) => a + b.netPnl, 0));
+      profitFactor = grossLoss > 0 ? Number((grossWin / grossLoss).toFixed(2)) : grossWin > 0 ? 9.9 : 0;
+    }
 
-    let statusLevel: StrategyPerformanceMetrics['statusLevel'] = 'NORMAL_EXCELLENT';
-    let statusLabel = '🟢 正常平稳 (优秀)';
+    let statusLevel: StrategyPerformanceMetrics['statusLevel'] = 'NO_DATA';
+    let statusLabel = '⚪ 等待真实成交样本';
 
-    if (sharpe < 0 || stratMaxDd > 18) {
-      statusLevel = 'ABNORMAL_HIGH_RISK';
-      statusLabel = '🔴 非正常波动警告';
-    } else if (sharpe < 1.0 || stratMaxDd > 12) {
-      statusLevel = 'WARNING_LOW';
-      statusLabel = '🟡 警戒观察';
-    } else if (sharpe < 1.8) {
-      statusLevel = 'NORMAL_STABLE';
-      statusLabel = '🔵 正常平稳';
+    if (totalTrades >= 2 && sharpe !== null && stratMaxDd !== null) {
+      if (sharpe < 0 || stratMaxDd > 18) {
+        statusLevel = 'ABNORMAL_HIGH_RISK';
+        statusLabel = '🔴 非正常波动警告';
+      } else if (sharpe < 1.0 || stratMaxDd > 12) {
+        statusLevel = 'WARNING_LOW';
+        statusLabel = '🟡 警戒观察';
+      } else if (sharpe < 1.8) {
+        statusLevel = 'NORMAL_STABLE';
+        statusLabel = '🔵 正常平稳';
+      } else {
+        statusLevel = 'NORMAL_EXCELLENT';
+        statusLabel = '🟢 正常平稳 (优秀)';
+      }
     }
 
     return {
@@ -224,7 +250,7 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
         </div>
 
         <div className="flex items-center gap-2">
-          {overallSharpe < 0 || overallMaxDd > 20 ? (
+          {(overallSharpe !== null && overallSharpe < 0) || overallMaxDd > 20 ? (
             <span className="px-3 py-1 rounded-xl bg-rose-500/20 text-rose-300 border border-rose-500/40 text-xs font-bold flex items-center gap-1.5 animate-pulse">
               <AlertCircle className="w-4 h-4 text-rose-400" />
               🔴 整体处于非正常剧烈波动状态
@@ -250,9 +276,13 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
             {getSharpeStatusBadge(overallSharpe)}
           </div>
           <div className="flex items-baseline gap-3">
-            <div className="text-2xl font-bold font-mono text-white">{overallSharpe.toFixed(2)}</div>
+            <div className="text-2xl font-bold font-mono text-white">
+              {overallSharpe !== null ? overallSharpe.toFixed(2) : '--'}
+            </div>
             <div className="text-xs text-slate-400">
-              {overallSharpe >= 2.0
+              {overallSharpe === null
+                ? '等待至少 2 笔真实已平仓记录以计算真实夏普比率'
+                : overallSharpe >= 2.0
                 ? '极高超额收益风险比 (夏普 ≥ 2.0)'
                 : overallSharpe >= 1.0
                 ? '稳健平稳收益状态 (Sharpe 1.0 ~ 2.0)'
@@ -329,9 +359,13 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
             </div>
             <div className="shrink-0 font-mono text-[11px] px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-800 font-bold">
               {status.marketCorrelation.isCircuitBreakerActive ? (
-                <span className="text-rose-400">🚨 最低避险保护: 杠杆 1x / 持仓 ≤ 1 笔</span>
+                <span className="text-rose-400">
+                  🚨 熔断保护: 杠杆 ≤ {status.marketCorrelation.safeLevelLeverage}x / 持仓 ≤ {status.marketCorrelation.maxAllowedAccountPositions} 笔
+                </span>
               ) : (
-                <span className="text-emerald-400">🟢 避险门槛正常: 杠杆 5x / 持仓 ≤ 4 笔</span>
+                <span className="text-emerald-400">
+                  🟢 避险门槛正常: 杠杆 {status.leverage}x / 最大持仓 {status.portfolioAllocation?.maxConcurrentPositions ?? 5} 笔
+                </span>
               )}
             </div>
           </div>
@@ -455,42 +489,63 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
                   </td>
 
                   <td className="px-4 py-3 font-mono font-bold">
-                    <span
-                      className={
-                        item.sharpeRatio >= 2.0
-                          ? 'text-emerald-400'
-                          : item.sharpeRatio >= 1.0
-                          ? 'text-sky-300'
-                          : 'text-amber-400'
-                      }
-                    >
-                      {item.sharpeRatio.toFixed(2)}
-                    </span>
+                    {item.sharpeRatio === null ? (
+                      <span className="text-slate-500">--</span>
+                    ) : (
+                      <span
+                        className={
+                          item.sharpeRatio >= 2.0
+                            ? 'text-emerald-400'
+                            : item.sharpeRatio >= 1.0
+                            ? 'text-sky-300'
+                            : 'text-amber-400'
+                        }
+                      >
+                        {item.sharpeRatio.toFixed(2)}
+                      </span>
+                    )}
                   </td>
 
                   <td className="px-4 py-3 font-mono font-bold">
-                    <span
-                      className={
-                        item.maxDrawdownPercent <= 5.0
-                          ? 'text-emerald-400'
-                          : item.maxDrawdownPercent <= 12.0
-                          ? 'text-sky-300'
-                          : 'text-rose-400'
-                      }
-                    >
-                      {item.maxDrawdownPercent.toFixed(1)}%
-                    </span>
+                    {item.maxDrawdownPercent === null ? (
+                      <span className="text-slate-500">--</span>
+                    ) : (
+                      <span
+                        className={
+                          item.maxDrawdownPercent <= 5.0
+                            ? 'text-emerald-400'
+                            : item.maxDrawdownPercent <= 12.0
+                            ? 'text-sky-300'
+                            : 'text-rose-400'
+                        }
+                      >
+                        {item.maxDrawdownPercent.toFixed(1)}%
+                      </span>
+                    )}
                   </td>
 
                   <td className="px-4 py-3 font-mono font-semibold text-slate-200">
-                    {item.winRate.toFixed(1)}% ({item.wins}/{item.totalTrades || 1}胜)
+                    {item.winRate === null ? (
+                      <span className="text-slate-500">0 笔</span>
+                    ) : (
+                      `${item.winRate.toFixed(1)}% (${item.wins}/${item.totalTrades}胜)`
+                    )}
                   </td>
 
                   <td className="px-4 py-3 font-mono font-bold text-amber-300">
-                    {item.profitFactor.toFixed(2)}
+                    {item.profitFactor === null ? (
+                      <span className="text-slate-500">--</span>
+                    ) : (
+                      item.profitFactor.toFixed(2)
+                    )}
                   </td>
 
                   <td className="px-4 py-3">
+                    {item.statusLevel === 'NO_DATA' && (
+                      <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-slate-800 text-slate-400 border border-slate-700">
+                        ⚪ 等待真实样本
+                      </span>
+                    )}
                     {item.statusLevel === 'NORMAL_EXCELLENT' && (
                       <span className="px-2 py-0.5 rounded text-[11px] font-bold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30">
                         🟢 正常平稳 (优秀)
@@ -598,6 +653,107 @@ export const LivePerformanceMonitor: React.FC<LivePerformanceMonitorProps> = ({ 
           ) : (
             <div className="p-4 text-center text-xs text-slate-500 font-sans border border-slate-800/80 rounded-lg">
               🛡️ 组合相关性防线监听中，监测到多个正相关币种（如 BTC/ETH r≥0.80）时自动主动下调弱势品种持仓
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Dynamic Portfolio Allocation (VIX-like) & Cross-Symbol Statistical Arbitrage Monitor */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        {/* Panel A: Dynamic VIX-like Portfolio Weight Allocation */}
+        <div className="bg-[#0b0e14] border border-emerald-500/30 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span className="text-xs font-bold text-emerald-300 flex items-center gap-1.5">
+              <PieChart className="w-4 h-4 text-emerald-400" />
+              <span>动态资产组合权重分配 (VIX-like Portfolio Allocation)</span>
+            </span>
+            {status?.portfolioAllocation && (
+              <span className="text-[10px] px-2 py-0.5 rounded bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono font-bold">
+                VIX指数: {status.portfolioAllocation.vixLikeIndex} | 敞口 {(status.portfolioAllocation.totalExposureMultiplier * 100).toFixed(0)}%
+              </span>
+            )}
+          </div>
+
+          {status?.portfolioAllocation ? (
+            <div className="space-y-3 text-xs">
+              <div className="p-2.5 rounded-lg bg-slate-900/70 border border-slate-800 text-[11px] text-slate-300 leading-relaxed">
+                {status.portfolioAllocation.coverageDescription}
+              </div>
+              <div className="grid grid-cols-2 sm:grid-cols-3 gap-2 font-mono">
+                {status.portfolioAllocation.weights.map((w) => (
+                  <div key={w.symbol} className="bg-slate-900/60 border border-slate-800 rounded-lg p-2 space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="font-bold text-white">{w.symbol.replace('USDT', '')}</span>
+                      <span className="text-emerald-400 font-bold">{w.targetWeightPercent}%</span>
+                    </div>
+                    <div className="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-emerald-400 rounded-full"
+                        style={{ width: `${Math.min(100, w.targetWeightPercent * 2)}%` }}
+                      />
+                    </div>
+                    <div className="flex items-center justify-between text-[10px] text-slate-400">
+                      <span>波动 {w.volatilityPct}</span>
+                      <span className="text-cyan-300">乘数 {w.sizingMultiplier}x</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          ) : (
+            <div className="p-4 text-center text-xs text-slate-500">正在计算全合约波动率平价权重...</div>
+          )}
+        </div>
+
+        {/* Panel B: Cross-Symbol Statistical Arbitrage Monitor */}
+        <div className="bg-[#0b0e14] border border-purple-500/30 rounded-xl p-4 space-y-3">
+          <div className="flex items-center justify-between border-b border-slate-800 pb-2">
+            <span className="text-xs font-bold text-purple-300 flex items-center gap-1.5">
+              <GitCompare className="w-4 h-4 text-purple-400" />
+              <span>跨品种套利监控 (Cross-Symbol Divergence & Reversion)</span>
+            </span>
+            <span className="text-[10px] px-2 py-0.5 rounded bg-purple-500/20 text-purple-300 font-mono">
+              做空强品种 / 做多弱品种
+            </span>
+          </div>
+
+          {status?.arbitrageOpportunities && status.arbitrageOpportunities.length > 0 ? (
+            <div className="space-y-2 max-h-52 overflow-y-auto pr-1">
+              {status.arbitrageOpportunities.slice(0, 4).map((opp) => (
+                <div
+                  key={opp.id}
+                  className={`p-2.5 rounded-lg border text-xs space-y-1 ${
+                    opp.isActionable
+                      ? 'bg-purple-950/30 border-purple-500/60'
+                      : 'bg-slate-900/70 border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-center justify-between font-mono">
+                    <span className="font-bold text-white">{opp.pairName}</span>
+                    <span
+                      className={`text-[10px] px-1.5 py-0.5 rounded font-bold ${
+                        opp.isActionable
+                          ? 'bg-purple-500/30 text-purple-200 border border-purple-400/50'
+                          : 'bg-slate-800 text-slate-300'
+                      }`}
+                    >
+                      Z = {opp.spreadZScore >= 0 ? '+' : ''}{opp.spreadZScore} (阈值 ±{opp.optimalEntryZScore})
+                    </span>
+                  </div>
+                  <div className="text-[11px] text-slate-300 leading-relaxed">{opp.reason}</div>
+                  <div className="flex flex-wrap items-center justify-between gap-2 text-[10px] text-slate-400 font-mono">
+                    <span>相关性 r={opp.correlation}</span>
+                    <span>{opp.reversionSpeedLabel}</span>
+                    <span className="text-purple-300">
+                      强: {opp.strongSymbol.replace('USDT', '')} / 弱: {opp.weakSymbol.replace('USDT', '')}
+                    </span>
+                  </div>
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="p-4 text-center text-xs text-slate-500 border border-slate-800/80 rounded-lg">
+              🔀 跨品种均值回归扫频中，持续监测高度相关合约价格分叉 Z-Score 与 AR(1) 回归半衰期
             </div>
           )}
         </div>

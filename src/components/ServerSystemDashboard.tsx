@@ -20,13 +20,13 @@ interface ServerSystemDashboardProps {
 
 export const ServerSystemDashboard: React.FC<ServerSystemDashboardProps> = ({ status }) => {
   const metrics = status?.systemMetrics || {
-    cpuUsagePercent: 14.2,
-    totalMemoryMb: 1931,
-    freeMemoryMb: 1248,
-    usedMemoryMb: 683,
-    memoryUsagePercent: 35.4,
-    processHeapUsedMb: 68.5,
-    uptimeSeconds: 43200,
+    cpuUsagePercent: 0,
+    totalMemoryMb: 0,
+    freeMemoryMb: 0,
+    usedMemoryMb: 0,
+    memoryUsagePercent: 0,
+    processHeapUsedMb: 0,
+    uptimeSeconds: 0,
   };
 
   const recentEvents = status?.recentSchedulingEvents || status?.logs.slice(-10).reverse() || [];

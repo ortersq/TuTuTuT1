@@ -23,7 +23,7 @@ export const Header: React.FC<HeaderProps> = ({
   onLogout,
 }) => {
   return (
-    <header className="flex items-center justify-between gap-8 px-6 py-3.5 bg-[#0e131f] border-b border-slate-800 shrink-0">
+    <header className="flex items-center justify-between gap-4 px-4 py-3 bg-[#0e131f] border-b border-slate-800 shrink-0">
       {/* Zone 1: Brand Wordmark */}
       <div className="flex items-center gap-3 shrink-0">
         <div className="w-8 h-8 rounded-lg bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400 font-bold">
@@ -51,7 +51,7 @@ export const Header: React.FC<HeaderProps> = ({
       </div>
 
       {/* Zone 2: Navigation Tabs */}
-      <nav className="flex items-center gap-6 text-xs font-medium text-slate-400">
+      <nav className="flex items-center gap-3.5 text-xs font-medium text-slate-400 overflow-x-auto">
         <button
           onClick={() => setActiveTab('monitor')}
           className={`flex items-center gap-1.5 transition-colors whitespace-nowrap py-1 cursor-pointer ${

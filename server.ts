@@ -4,6 +4,7 @@ import { fileURLToPath } from 'url';
 import fs from 'fs';
 import { botEngine } from './src/server/botEngine';
 import { fetchBinanceKlines } from './src/utils/binanceApi';
+import { LOCKED_TARGET_SYMBOLS, normalizeLockedSymbol } from './src/utils/riskAndExecution';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -56,9 +57,59 @@ function requireAuth(req: express.Request, res: express.Response, next: express.
   next();
 }
 
-// Protected Bot Status
-app.get('/api/bot/status', requireAuth, (req, res) => {
+// Protected Bot Status (auto-refreshes live Binance account & positions when API keys are set)
+app.get('/api/bot/status', requireAuth, async (req, res) => {
+  if (botEngine.hasApiCredentials()) {
+    await botEngine.syncLiveAccountIfStale(4000);
+  }
   res.json(botEngine.getStatus());
+});
+
+// Direct Binance Live Account, Open Positions & Real Equity Endpoint
+app.get('/api/binance/live-account', requireAuth, async (req, res) => {
+  if (!botEngine.hasApiCredentials()) {
+    return res.status(400).json({
+      error: 'NO_API_KEYS',
+      message: '尚未配置币安实盘 API Key，请在系统设置中输入后连接实盘账户',
+    });
+  }
+  await botEngine.syncLiveAccountIfStale(3000);
+  const status = botEngine.getStatus();
+  return res.json({
+    mode: status.mode,
+    hasBinanceKeys: status.hasBinanceKeys,
+    liveSyncInfo: status.liveSyncInfo,
+    balance: status.balance,
+    equity: status.equity,
+    peakEquity: status.peakEquity,
+    drawdownPercent: status.drawdownPercent,
+    leverage: status.leverage,
+    monitoredSymbols: status.monitoredSymbols,
+    riskMetrics: status.riskMetrics,
+    activePositions: status.activePositions,
+    equityHistory: status.equityHistory,
+    closedTrades: status.closedTrades,
+    lastUpdateTime: status.lastUpdateTime,
+  });
+});
+
+// Force immediate Binance Futures sync (Account, PositionRisk, OpenOrders, Income & UserTrades)
+app.post('/api/binance/sync-now', requireAuth, async (req, res) => {
+  if (!botEngine.hasApiCredentials()) {
+    return res.status(400).json({
+      error: 'NO_API_KEYS',
+      message: '尚未配置币安 API Key',
+    });
+  }
+  await botEngine.syncLiveAccountNow(true);
+  const status = botEngine.getStatus();
+  return res.json({
+    success: Boolean(status.liveSyncInfo?.syncOk),
+    message: status.liveSyncInfo?.syncOk
+      ? '实盘资产与持仓数据已同步更新'
+      : status.liveSyncInfo?.errorMessage || '实盘账户同步失败',
+    status,
+  });
 });
 
 // Downloadable Full Diagnostic & Log Export Endpoint
@@ -66,6 +117,17 @@ app.get('/api/bot/export-diagnostic-logs', requireAuth, (req, res) => {
   const status = botEngine.getStatus();
   const exportData = {
     exportTime: new Date().toISOString(),
+    mode: status.mode,
+    hasBinanceKeys: status.hasBinanceKeys,
+    liveSyncInfo: status.liveSyncInfo,
+    balance: status.balance,
+    equity: status.equity,
+    riskMetrics: status.riskMetrics,
+    marketCorrelation: status.marketCorrelation,
+    strategyScreener: status.strategyScreener,
+    portfolioAllocation: status.portfolioAllocation,
+    portfolioBasket: status.portfolioBasket,
+    arbitrageOpportunities: status.arbitrageOpportunities,
     systemMetrics: status.systemMetrics,
     learningGeneration: status.learningGeneration,
     patternLearningStats: status.patternLearningStats,
@@ -113,11 +175,20 @@ app.post('/api/bot/test-notification', requireAuth, async (req, res) => {
   res.json({ success: true, sent, status: botEngine.getStatus() });
 });
 
-// Protected Add Monitored Symbol
+// Protected Add Monitored Symbol (strictly restricted to locked 5 contracts)
 app.post('/api/bot/symbols/add', requireAuth, (req, res) => {
   const { symbol } = req.body || {};
   if (!symbol) return res.status(400).json({ error: 'Symbol parameter required' });
-  const added = botEngine.addSymbol(symbol);
+  const locked = normalizeLockedSymbol(symbol);
+  if (!locked) {
+    return res.status(400).json({
+      success: false,
+      error: 'SYMBOL_LOCKED',
+      message: `监控范围已锁定为 5 个核心合约 (${LOCKED_TARGET_SYMBOLS.join(', ')})，禁止添加 ${symbol}`,
+      status: botEngine.getStatus(),
+    });
+  }
+  const added = botEngine.addSymbol(locked);
   res.json({ success: added, status: botEngine.getStatus() });
 });
 
@@ -130,17 +201,32 @@ app.post('/api/bot/symbols/remove', requireAuth, (req, res) => {
 });
 
 // Protected Update Binance API Credentials
-app.post('/api/bot/credentials', requireAuth, (req, res) => {
+app.post('/api/bot/credentials', requireAuth, async (req, res) => {
   const { apiKey, apiSecret } = req.body || {};
-  botEngine.setCredentials(apiKey || '', apiSecret || '');
-  res.json({ success: true, message: 'API 密钥已保存', status: botEngine.getStatus() });
+  await botEngine.setCredentials(apiKey || '', apiSecret || '');
+  res.json({ success: true, message: 'API 密钥已保存并同步账户状态', status: botEngine.getStatus() });
 });
 
 // Protected Emergency Close Position
-app.post('/api/bot/close-position', requireAuth, (req, res) => {
+app.post('/api/bot/close-position', requireAuth, async (req, res) => {
   const { symbol } = req.body || {};
-  botEngine.emergencyClosePosition('END_OF_DATA', symbol);
+  await botEngine.emergencyClosePosition('END_OF_DATA', symbol);
   res.json({ success: true, message: '仓位已平仓', status: botEngine.getStatus() });
+});
+
+// Protected Portfolio One-Click Close All Positions (losing first, cancels residual exchange SL/TP orders, sets anti-reopen cooldown)
+app.post('/api/bot/close-all', requireAuth, async (req, res) => {
+  const result = await botEngine.closeAllPositions('MANUAL_CLOSE_ALL');
+  res.json({
+    success: true,
+    closedCount: result.closedCount,
+    netRealizedBeforeClose: result.netRealizedBeforeClose,
+    message:
+      result.closedCount > 0
+        ? `已按先亏后盈顺序全平 ${result.closedCount} 笔持仓并撤销所有挂单`
+        : '当前无活跃持仓',
+    status: botEngine.getStatus(),
+  });
 });
 
 // Proxy Binance Klines

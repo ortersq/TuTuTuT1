@@ -1,29 +1,49 @@
 import React, { useState } from 'react';
 import { BotStatus, SymbolScanResult, ActivePosition } from '../server/botEngine';
-import { Activity, ShieldCheck, Zap, LineChart, AlertTriangle, Compass, HeartPulse } from 'lucide-react';
+import {
+  Activity,
+  ShieldCheck,
+  Zap,
+  LineChart,
+  AlertTriangle,
+  Compass,
+  HeartPulse,
+  Award,
+  Ban,
+  ShieldAlert,
+} from 'lucide-react';
 import { CandleChart } from './CandleChart';
 import { LiveEquityChart } from './LiveEquityChart';
 import { ServerSystemDashboard } from './ServerSystemDashboard';
 import { LivePerformanceMonitor } from './LivePerformanceMonitor';
+import { PortfolioBasketPanel } from './PortfolioBasketPanel';
 import { fetchBinanceKlines } from '../utils/binanceApi';
 import { Kline } from '../types/trading';
 
 interface MultiSymbolScannerProps {
   status: BotStatus | null;
   onRefreshStatus: () => void;
+  onSyncLive?: () => Promise<void> | void;
   onClosePosition: (symbol: string) => void;
+  onCloseAllPositions?: () => Promise<void> | void;
 }
 
 export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
   status,
+  onSyncLive,
   onClosePosition,
+  onCloseAllPositions,
 }) => {
   const [selectedInspect, setSelectedInspect] = useState<{ symbol: string; interval: string } | null>(null);
   const [inspectKlines, setInspectKlines] = useState<Kline[]>([]);
   const [isFetchingChart, setIsFetchingChart] = useState<boolean>(false);
 
-  const symbols = status?.monitoredSymbols || ['BTCUSDT', 'ETHUSDT', 'SOLUSDT', 'BNBUSDT'];
+  const symbols = status?.monitoredSymbols || ['BTCUSDT', 'ETHUSDT', 'XAUUSDT', 'NVDAUSDT', 'CLUSDT'];
   const timeframes = status?.monitoredTimeframes || ['5m', '15m', '30m'];
+  const hasKeys = Boolean(status?.hasBinanceKeys);
+  const liveSync = status?.liveSyncInfo;
+  const displayEquity = status ? status.equity : 0;
+  const displayBalance = status ? status.balance : 0;
 
   const handleInspectChart = async (symbol: string, interval: string) => {
     setSelectedInspect({ symbol, interval });
@@ -78,9 +98,36 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
         </div>
 
         <div className="bg-[#111726] border border-slate-800 rounded-xl p-4">
-          <div className="text-xs text-slate-400 font-medium">账户净值 (USDT)</div>
+          <div className="text-xs text-slate-400 font-medium flex items-center justify-between">
+            <span>{hasKeys ? '实盘账户净值 (USDT)' : '模拟账户净值 (USDT)'}</span>
+            {hasKeys && (
+              <span
+                className={`text-[10px] font-mono px-1.5 py-0.5 rounded ${
+                  liveSync?.syncOk
+                    ? 'bg-emerald-500/20 text-emerald-300'
+                    : 'bg-amber-500/20 text-amber-300'
+                }`}
+              >
+                {liveSync?.syncOk ? '实盘已同步' : '等待同步'}
+              </span>
+            )}
+          </div>
           <div className="text-sm font-bold text-slate-100 font-mono mt-1">
-            ${(status?.equity || 10000).toLocaleString('en-US', { minimumFractionDigits: 2 })}
+            {hasKeys && !liveSync?.syncOk && displayEquity === 0
+              ? '⏳ 正在拉取交易所净值...'
+              : `$${displayEquity.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`}
+          </div>
+          <div className="text-[10px] text-slate-400 font-mono mt-0.5 flex items-center justify-between gap-2">
+            {hasKeys && liveSync?.syncOk ? (
+              <>
+                <span>钱包: ${liveSync.walletBalance.toFixed(2)} | 可用: ${liveSync.availableBalance.toFixed(2)}</span>
+                <span className={liveSync.unrealizedProfit >= 0 ? 'text-emerald-400 font-semibold' : 'text-rose-400 font-semibold'}>
+                  浮盈 {liveSync.unrealizedProfit >= 0 ? '+' : ''}${liveSync.unrealizedProfit.toFixed(2)}
+                </span>
+              </>
+            ) : (
+              <span>可用保证金: ${displayBalance.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+            )}
           </div>
         </div>
 
@@ -92,8 +139,76 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
         </div>
       </div>
 
+      {/* Live Total-Equity Allocation & Risk Control Strip */}
+      {status?.riskMetrics && (
+        <div className="bg-[#111726] border border-slate-800 rounded-xl px-4 py-3 flex flex-wrap items-center justify-between gap-3 text-xs">
+          <div className="flex flex-wrap items-center gap-4 font-mono">
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">🔒 锁定合约:</span>
+              <span className="text-amber-300 font-bold">
+                {symbols.map((s) => s.replace('USDT', '')).join(' / ')}
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">资金占用:</span>
+              <span
+                className={`font-bold ${
+                  status.riskMetrics.marginUtilizationPercent >= 70
+                    ? 'text-amber-400'
+                    : 'text-emerald-400'
+                }`}
+              >
+                {status.riskMetrics.marginUtilizationPercent.toFixed(1)}%
+              </span>
+              <span className="text-slate-500">
+                (安全缓冲 {status.riskMetrics.freeMarginBufferPercent.toFixed(1)}%)
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">单笔风险上限:</span>
+              <span className="text-cyan-300 font-bold">
+                {status.riskMetrics.riskPerTradePercent.toFixed(1)}% (${status.riskMetrics.maxSingleTradeRiskUsdt.toFixed(2)})
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5">
+              <span className="text-slate-400">杠杆上限:</span>
+              <span className="text-slate-200 font-bold">{status.leverage}x (只降不升)</span>
+            </div>
+          </div>
+
+          <div className="flex flex-wrap items-center gap-3 font-mono text-[11px]">
+            <span className="px-2 py-0.5 rounded bg-[#0b0e14] border border-slate-800 text-slate-300">
+              {status.riskMetrics.isHedgeMode ? '双向持仓 (Hedge)' : '单向持仓 (One-Way)'}
+            </span>
+            <span
+              className={`px-2 py-0.5 rounded border font-semibold ${
+                status.riskMetrics.isDrawdownLocked
+                  ? 'bg-rose-500/20 border-rose-500/50 text-rose-300'
+                  : 'bg-emerald-500/10 border-emerald-500/30 text-emerald-300'
+              }`}
+            >
+              {status.riskMetrics.isDrawdownLocked
+                ? `🛑 回撤熔断锁仓 (${status.riskMetrics.drawdownPercent.toFixed(1)}%/${status.riskMetrics.maxAllowedDrawdownPercent}%)`
+                : `✓ 回撤 ${status.riskMetrics.drawdownPercent.toFixed(1)}% / 熔断线 ${status.riskMetrics.maxAllowedDrawdownPercent}%`}
+            </span>
+          </div>
+        </div>
+      )}
+
+      {/* Live Binance Sync Error Banner if Keys Set but Exchange Rejected/Unreachable */}
+      {hasKeys && liveSync && !liveSync.syncOk && (
+        <div className="p-3.5 bg-rose-500/10 border border-rose-500/40 rounded-xl text-xs text-rose-200 flex items-center justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <ShieldAlert className="w-4 h-4 text-rose-400 shrink-0" />
+            <span>
+              <strong>实盘账户同步提示</strong>：{liveSync.errorMessage || '未能获取币安合约账户信息，已暂停使用模拟数据以防失真。请确认服务器 IP 白名单、合约交易权限或交易所连接状态。'}
+            </span>
+          </div>
+        </div>
+      )}
+
       {/* Mode Banner explanation if paper mode */}
-      {!status?.hasBinanceKeys && (
+      {!hasKeys && (
         <div className="p-3.5 bg-sky-500/10 border border-sky-500/30 rounded-xl text-xs text-sky-200 flex items-center justify-between">
           <div className="flex items-center gap-2">
             <AlertTriangle className="w-4 h-4 text-sky-400 shrink-0" />
@@ -108,15 +223,104 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
       {/* Real-Time Live Quant Performance Monitor (Sharpe Ratio & Max Drawdown) */}
       <LivePerformanceMonitor status={status} />
 
+      {/* 7-Day Quantitative Strategy Auto Screener (Grade A-F, auto eliminate < C) */}
+      {status?.strategyScreener && status.strategyScreener.length > 0 && (
+        <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+            <div className="flex items-center gap-2.5">
+              <Award className="w-5 h-5 text-amber-400" />
+              <div>
+                <h3 className="text-sm font-bold text-slate-100">
+                  策略自动筛选器 (7-Day Strategy Auto Screener · A–F 量化评级)
+                </h3>
+                <p className="text-[11px] text-slate-400 mt-0.5">
+                  依据过去 7 天实盘/模拟成交的胜率、盈亏比 (Profit Factor) 与最大回撤自动量化评级，低于 C 级 (D/F) 的低效策略将自动淘汰禁开！
+                </p>
+              </div>
+            </div>
+            <span className="text-[11px] font-mono px-2.5 py-1 rounded bg-slate-900 border border-slate-700 text-amber-300">
+              淘汰线: &lt; C 级 (样本 ≥ 3笔生效)
+            </span>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-5 gap-3">
+            {status.strategyScreener.map((item) => {
+              const isEliminated = item.status === 'ELIMINATED_BELOW_C';
+              const gradeColors: Record<string, string> = {
+                A: 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40',
+                B: 'bg-sky-500/20 text-sky-300 border-sky-500/40',
+                C: 'bg-amber-500/20 text-amber-300 border-amber-500/40',
+                D: 'bg-orange-500/20 text-orange-300 border-orange-500/40',
+                F: 'bg-rose-500/20 text-rose-300 border-rose-500/40',
+              };
+              return (
+                <div
+                  key={item.strategyKey}
+                  className={`rounded-xl p-3.5 border space-y-2 transition-all ${
+                    isEliminated
+                      ? 'bg-rose-950/20 border-rose-500/40 opacity-85'
+                      : 'bg-[#0b0e14] border-slate-800'
+                  }`}
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="text-xs font-bold text-slate-100 leading-snug">
+                      {item.strategyName}
+                    </div>
+                    <span
+                      className={`shrink-0 px-2 py-0.5 rounded text-xs font-extrabold font-mono border ${
+                        gradeColors[item.grade] || gradeColors.C
+                      }`}
+                    >
+                      {item.grade} 级
+                    </span>
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-1.5 text-[11px] font-mono text-slate-300">
+                    <div>7D胜率: <strong>{item.winRatePercent}%</strong></div>
+                    <div>盈亏比: <strong>{item.profitFactor}</strong></div>
+                    <div>回撤: <strong>{item.maxDrawdownPercent}%</strong></div>
+                    <div>评分: <strong>{item.score}/100</strong></div>
+                  </div>
+
+                  <div className="pt-1 border-t border-slate-800/80 flex items-center justify-between text-[10px]">
+                    <span className="text-slate-400">7日样本: {item.tradesCount7d}笔</span>
+                    {isEliminated ? (
+                      <span className="text-rose-400 font-bold flex items-center gap-1">
+                        <Ban className="w-3 h-3" /> 已自动淘汰
+                      </span>
+                    ) : (
+                      <span className="text-emerald-400 font-semibold">
+                        {item.grade === 'A' ? '🟢 精选优先' : '✓ 激活运行'}
+                      </span>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       {/* Server Hardware & Internal Scheduling Dashboard */}
       <ServerSystemDashboard status={status} />
 
       {/* Live PnL & Equity Line Chart (Recharts) */}
       <LiveEquityChart
         equityHistory={status?.equityHistory || []}
-        peakEquity={status?.peakEquity}
-        currentEquity={status?.equity}
-        currentBalance={status?.balance}
+        peakEquity={status?.peakEquity ?? 0}
+        currentEquity={displayEquity}
+        currentBalance={displayBalance}
+        hasBinanceKeys={hasKeys}
+        liveSyncInfo={liveSync}
+        activePositions={status?.activePositions || []}
+        onSyncLive={onSyncLive}
+      />
+
+      {/* Portfolio Basket Net Take-Profit & One-Click Close All */}
+      <PortfolioBasketPanel
+        basket={status?.portfolioBasket}
+        activePositionsCount={status?.activePositions.length ?? 0}
+        onCloseAllPositions={onCloseAllPositions}
       />
 
       {/* Main Multi-Symbol Grid */}
@@ -148,6 +352,11 @@ export const MultiSymbolScanner: React.FC<MultiSymbolScannerProps> = ({
                   <div>
                     <div className="text-base font-bold text-slate-100 flex items-center gap-2">
                       <span>{symbol}</span>
+                      {status?.symbolExchangeRules?.[symbol]?.available === false && (
+                        <span className="text-[10px] px-1.5 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/40 font-mono">
+                          币安USDT合约暂未上市
+                        </span>
+                      )}
                     </div>
                     {/* Live Market Trend Regime Badge */}
                     <div className="text-xs font-semibold mt-0.5 flex items-center gap-1.5">

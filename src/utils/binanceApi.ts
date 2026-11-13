@@ -5,6 +5,7 @@ import {
   DataSourceAudit,
   Kline,
   StrategyKey,
+  SymbolExchangeRules,
 } from '../types/trading';
 import { runFuturesBacktest } from './backtest';
 import { STRATEGY_CATALOG } from './strategies';
@@ -20,13 +21,63 @@ export interface BinanceFetchResult {
   audit: DataSourceAudit;
 }
 
-// Official Binance public endpoints in order of reliability and open CORS support
+// Official Binance Futures & public market endpoints in priority order
 const BINANCE_OFFICIAL_ENDPOINTS = [
-  'https://data-api.binance.vision/api/v3/klines', // Binance official market data API (CORS *, no geo-block)
-  'https://api.binance.us/api/v3/klines',          // Binance US public API (CORS *, no geo-block)
-  'https://api.binance.com/api/v3/klines',         // Binance global API
-  'https://fapi.binance.com/fapi/v1/klines',       // Binance Futures API
+  'https://fapi.binance.com/fapi/v1/klines',       // Binance USDT-M Futures API (supports Crypto & TradFi perps like XAUUSDT)
+  'https://data-api.binance.vision/api/v3/klines', // Binance official market data API (CORS *, no geo-block fallback)
+  'https://api.binance.com/api/v3/klines',         // Binance global Spot API fallback
+  'https://api.binance.us/api/v3/klines',          // Binance US fallback
 ];
+
+export const DEFAULT_SYMBOL_EXCHANGE_RULES: Record<string, SymbolExchangeRules> = {
+  BTCUSDT: { symbol: 'BTCUSDT', available: true, pricePrecision: 1, quantityPrecision: 3, tickSize: 0.1, stepSize: 0.001, minQty: 0.001, minNotional: 100 },
+  ETHUSDT: { symbol: 'ETHUSDT', available: true, pricePrecision: 2, quantityPrecision: 3, tickSize: 0.01, stepSize: 0.001, minQty: 0.001, minNotional: 20 },
+  XAUUSDT: { symbol: 'XAUUSDT', available: true, pricePrecision: 2, quantityPrecision: 3, tickSize: 0.01, stepSize: 0.001, minQty: 0.001, minNotional: 5 },
+  NVDAUSDT: { symbol: 'NVDAUSDT', available: true, pricePrecision: 2, quantityPrecision: 2, tickSize: 0.01, stepSize: 0.01, minQty: 0.01, minNotional: 5 },
+  CLUSDT: { symbol: 'CLUSDT', available: true, pricePrecision: 2, quantityPrecision: 1, tickSize: 0.01, stepSize: 0.1, minQty: 0.1, minNotional: 5 },
+};
+
+export async function fetchFuturesExchangeRules(
+  baseUrl: string = 'https://fapi.binance.com'
+): Promise<Map<string, SymbolExchangeRules>> {
+  const map = new Map<string, SymbolExchangeRules>();
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 8000);
+    const resp = await fetch(`${baseUrl}/fapi/v1/exchangeInfo`, { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!resp.ok) return map;
+    const data = await resp.json();
+    const symbols: any[] = Array.isArray(data?.symbols) ? data.symbols : [];
+    for (const s of symbols) {
+      if (!s?.symbol) continue;
+      const filters: any[] = Array.isArray(s.filters) ? s.filters : [];
+      const priceFilter = filters.find((f) => f.filterType === 'PRICE_FILTER');
+      const lotFilter = filters.find((f) => f.filterType === 'LOT_SIZE');
+      const notionalFilter = filters.find((f) => f.filterType === 'MIN_NOTIONAL');
+
+      const tickSize = parseFloat(priceFilter?.tickSize || '0.01') || 0.01;
+      const stepSize = parseFloat(lotFilter?.stepSize || '0.001') || 0.001;
+      const minQty = parseFloat(lotFilter?.minQty || String(stepSize)) || stepSize;
+      const minNotional = parseFloat(notionalFilter?.notional || '5') || 5;
+
+      map.set(String(s.symbol).toUpperCase(), {
+        symbol: String(s.symbol).toUpperCase(),
+        available: s.status === 'TRADING',
+        pricePrecision: Number(s.pricePrecision ?? 2),
+        quantityPrecision: Number(s.quantityPrecision ?? 3),
+        tickSize,
+        stepSize,
+        minQty,
+        minNotional,
+        note: s.status === 'TRADING' ? undefined : `合约状态: ${s.status}`,
+      });
+    }
+  } catch {
+    // caller falls back cleanly to cached/default rules
+  }
+  return map;
+}
 
 /**
  * Fetch 100% real historical K-lines directly from Binance official API.
@@ -43,7 +94,7 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
     try {
       const url = `${endpoint}?symbol=${cleanSymbol}&interval=${interval}&limit=${Math.min(1000, limit)}`;
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 9000);
+      const timeoutId = setTimeout(() => controller.abort(), 5000);
 
       const resp = await fetch(url, {
         signal: controller.signal,
@@ -54,7 +105,14 @@ export async function fetchBinanceKlines(options: BinanceFetchOptions): Promise<
       clearTimeout(timeoutId);
 
       if (!resp.ok) {
-        throw new Error(`币安接口 HTTP ${resp.status} ${resp.statusText}`);
+        let errDetail = '';
+        try {
+          const errJson = await resp.json();
+          if (errJson?.msg) errDetail = ` (${errJson.msg})`;
+        } catch {
+          // ignore
+        }
+        throw new Error(`币安接口 HTTP ${resp.status}${errDetail}`);
       }
 
       const rawData = await resp.json();
