@@ -125,6 +125,7 @@ export interface BotTradeRecord {
   exitReason: ExitReason;
   strategyUsed: StrategyKey;
   isPaper: boolean;
+  isExternalExchangeTrade?: boolean;
 }
 
 export interface SymbolScanResult {
@@ -561,6 +562,7 @@ class TradingEngine {
       { type: 'BEAR_FLAG', name: '经典熊旗中继破位 (Bear Flag)' },
       { type: 'W_BOTTOM', name: 'W底颈线放量突破 (Double Bottom)' },
       { type: 'M_TOP', name: 'M头颈线放量破位 (Double Top)' },
+      { type: 'CROSS_SYMBOL_ARBITRAGE', name: '跨品种统计套利 (Cross-Symbol Arb)' },
     ];
 
     for (const p of defaultPatterns) {
@@ -588,7 +590,19 @@ class TradingEngine {
   }
 
   public updatePatternLearning(trade: BotTradeRecord) {
-    const key = trade.patternType || 'OTHER';
+    if (
+      trade.isExternalExchangeTrade ||
+      trade.patternType === 'LIVE_EXCHANGE_HISTORY' ||
+      trade.patternType === 'BINANCE_ACCOUNT_FILL' ||
+      trade.patternType === 'EXTERNAL_EXCHANGE_FILL' ||
+      trade.patternType === 'LIVE_EXCHANGE_SYNC' ||
+      trade.patternType === 'EXTERNAL_POSITION' ||
+      trade.patternType === 'OTHER' ||
+      !trade.patternType
+    ) {
+      return;
+    }
+    const key = trade.patternType;
     let item = this.patternLearningWeights.get(key);
     if (!item) {
       item = {
@@ -1457,6 +1471,7 @@ class TradingEngine {
       { type: 'BEAR_FLAG', name: '经典熊旗中继破位 (Bear Flag)' },
       { type: 'W_BOTTOM', name: 'W底颈线放量突破 (Double Bottom)' },
       { type: 'M_TOP', name: 'M头颈线放量破位 (Double Top)' },
+      { type: 'CROSS_SYMBOL_ARBITRAGE', name: '跨品种统计套利 (Cross-Symbol Arb)' },
     ];
 
     for (const kp of knownPatterns) {
@@ -1464,7 +1479,19 @@ class TradingEngine {
     }
 
     for (const t of this.closedTrades) {
-      const key = t.patternType || 'OTHER';
+      if (
+        t.isExternalExchangeTrade ||
+        t.patternType === 'LIVE_EXCHANGE_HISTORY' ||
+        t.patternType === 'BINANCE_ACCOUNT_FILL' ||
+        t.patternType === 'EXTERNAL_EXCHANGE_FILL' ||
+        t.patternType === 'LIVE_EXCHANGE_SYNC' ||
+        t.patternType === 'EXTERNAL_POSITION' ||
+        t.patternType === 'OTHER' ||
+        !t.patternType
+      ) {
+        continue;
+      }
+      const key = t.patternType;
       if (!map[key]) {
         map[key] = { name: t.patternName || key, wins: 0, losses: 0, netPnl: 0, returns: [] };
       }

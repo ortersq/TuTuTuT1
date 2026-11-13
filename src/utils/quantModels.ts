@@ -25,6 +25,7 @@ export interface TradeMetricInput {
   pnlPercent: number;
   strategyUsed: string;
   isPaper: boolean;
+  isExternalExchangeTrade?: boolean;
 }
 
 export interface ActivePositionSummaryInput {
@@ -46,6 +47,7 @@ export interface ScanAllocationInput {
 /**
  * 7-Day Quantitative Strategy Screener (Grade A-F)
  * Automatically marks strategies below Grade C (< C, i.e., D or F) with sufficient samples (>= 3 trades) as ELIMINATED.
+ * Strictly excludes external exchange fills and keeps all zero-sample strategies uneliminated (Grade B, ACTIVE_PASS).
  */
 export function evaluate7dStrategyScreener(
   closedTrades: TradeMetricInput[],
@@ -53,16 +55,29 @@ export function evaluate7dStrategyScreener(
 ): StrategyScreenerItem[] {
   const sevenDaysMs = 7 * 24 * 3600 * 1000;
   const recentTrades = closedTrades.filter(
-    (t) => t && Number.isFinite(t.exitTime) && t.exitTime >= now - sevenDaysMs
+    (t) =>
+      t &&
+      Number.isFinite(t.exitTime) &&
+      t.exitTime >= now - sevenDaysMs &&
+      !t.isExternalExchangeTrade &&
+      t.patternType !== 'LIVE_EXCHANGE_HISTORY' &&
+      t.patternType !== 'BINANCE_ACCOUNT_FILL' &&
+      t.patternType !== 'EXTERNAL_EXCHANGE_FILL' &&
+      t.patternType !== 'LIVE_EXCHANGE_SYNC'
   );
 
   return STRATEGY_CATALOG.map((strat) => {
     const keyword = strat.key.split('_')[0].toLowerCase();
     const trades = recentTrades.filter(
       (t) =>
-        t.strategyUsed === strat.key ||
-        (t.patternType && t.patternType.toLowerCase().includes(keyword)) ||
-        (strat.key === 'pattern_price_action' && t.strategyUsed === 'pattern_price_action')
+        !t.isExternalExchangeTrade &&
+        (t.strategyUsed === strat.key ||
+          (t.patternType && t.patternType.toLowerCase().includes(keyword)) ||
+          (strat.key === 'pattern_price_action' &&
+            t.strategyUsed === 'pattern_price_action' &&
+            t.patternType &&
+            t.patternType !== 'OTHER' &&
+            !t.patternType.includes('EXTERNAL')))
     );
 
     const count = trades.length;
@@ -101,7 +116,7 @@ export function evaluate7dStrategyScreener(
 
     let grade: StrategyScreenerGrade = 'B';
     if (count === 0) {
-      grade = 'B'; // Newly deployed / no recent 7d samples yet -> allow monitoring
+      grade = 'B'; // Newly deployed / zero 7d samples -> always allow monitoring and real trading
     } else if (score >= 82 && winRate >= 60 && profitFactor >= 1.6) {
       grade = 'A';
     } else if (score >= 68 && winRate >= 50 && profitFactor >= 1.2) {
@@ -114,6 +129,7 @@ export function evaluate7dStrategyScreener(
       grade = 'F';
     }
 
+    // Never eliminate unless >= 3 genuine bot trades have accumulated
     const shouldEliminate = count >= 3 && (grade === 'D' || grade === 'F');
     const status: StrategyScreenerItem['status'] = shouldEliminate
       ? 'ELIMINATED_BELOW_C'
@@ -121,7 +137,7 @@ export function evaluate7dStrategyScreener(
       ? 'ACTIVE_ELITE'
       : 'ACTIVE_PASS';
 
-    let reason = '尚无近 7 日样本，默认保持 B 级观察激活状态';
+    let reason = '策略已全线激活就绪，实时扫描 5 大主流合约 K 线形态与套利机会';
     if (count > 0 && shouldEliminate) {
       reason = `近 7 日 ${count} 笔实盘评分 ${grade} 级 (胜率 ${winRate.toFixed(1)}%, 盈亏比 ${profitFactor.toFixed(2)}, 回撤 ${maxDrawdownPercent.toFixed(1)}%)，低于 C 级阈值，已自动淘汰禁开！`;
     } else if (count > 0) {

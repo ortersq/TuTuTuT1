@@ -180,9 +180,9 @@ export function parseBinanceOpenPositions(
       symbol: rp.symbol,
       interval: existingLocal?.interval || 'LIVE',
       side,
-      patternType: existingLocal?.patternType || 'LIVE_EXCHANGE_SYNC',
-      patternName: existingLocal?.patternName || '币安实盘真实持仓',
-      patternCategory: existingLocal?.patternCategory || '交易所实盘同步',
+      patternType: existingLocal?.patternType || 'EXTERNAL_POSITION',
+      patternName: existingLocal?.patternName || '币安已建仓位',
+      patternCategory: existingLocal?.patternCategory || '交易所持仓同步',
       entryTime: existingLocal?.entryTime || Number(rp.updateTime) || now,
       entryPrice,
       currentPrice: markPrice,
@@ -258,8 +258,8 @@ export function parseBinanceRealClosedTrades(
         symbol: String(first.symbol),
         interval: 'LIVE',
         side,
-        patternType: 'LIVE_EXCHANGE_HISTORY',
-        patternName: '币安实盘真实成交',
+        patternType: 'BINANCE_ACCOUNT_FILL',
+        patternName: '实盘历史交割单 (Binance Fill)',
         entryTime: exitTime,
         exitTime,
         entryPrice: 0,
@@ -275,6 +275,7 @@ export function parseBinanceRealClosedTrades(
         exitReason: netPnl >= 0 ? 'TAKE_PROFIT' : 'STOP_LOSS',
         strategyUsed: 'pattern_price_action',
         isPaper: false,
+        isExternalExchangeTrade: true,
       });
     }
 
@@ -293,8 +294,8 @@ export function parseBinanceRealClosedTrades(
         symbol: String(item.symbol),
         interval: 'LIVE',
         side: 'LONG' as const,
-        patternType: 'LIVE_EXCHANGE_HISTORY',
-        patternName: '币安实盘已实现盈亏',
+        patternType: 'BINANCE_ACCOUNT_FILL',
+        patternName: '实盘历史资金流水 (Realized PnL)',
         entryTime: tTime,
         exitTime: tTime,
         entryPrice: 0,
@@ -310,6 +311,7 @@ export function parseBinanceRealClosedTrades(
         exitReason: (pnl >= 0 ? 'TAKE_PROFIT' : 'STOP_LOSS') as BotTradeRecord['exitReason'],
         strategyUsed: 'pattern_price_action' as StrategyKey,
         isPaper: false,
+        isExternalExchangeTrade: true,
       };
     })
     .slice(-50);
