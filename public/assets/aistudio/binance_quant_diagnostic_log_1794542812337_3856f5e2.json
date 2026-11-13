@@ -1,0 +1,3757 @@
+{
+  "exportTime": "2026-11-13T04:06:51.461Z",
+  "mode": "LIVE",
+  "hasBinanceKeys": true,
+  "liveSyncInfo": {
+    "syncedAt": 1794542810457,
+    "syncOk": false,
+    "errorMessage": "币安实盘账户同步失败: [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API.",
+    "walletBalance": 216.9765,
+    "availableBalance": 216.9765,
+    "marginBalance": 298.4604,
+    "unrealizedProfit": 0,
+    "equitySource": "BINANCE_LIVE_API"
+  },
+  "balance": 216.9765,
+  "equity": 298.4604,
+  "riskMetrics": {
+    "totalEquity": 298.46,
+    "walletBalance": 216.98,
+    "availableBalance": 216.98,
+    "totalMarginUsed": 0,
+    "marginUtilizationPercent": 0,
+    "freeMarginBufferPercent": 100,
+    "totalUnrealizedPnl": 0,
+    "drawdownPercent": 0.74,
+    "maxAllowedDrawdownPercent": 20,
+    "isDrawdownLocked": false,
+    "isHedgeMode": false,
+    "riskPerTradePercent": 2,
+    "maxSingleTradeRiskUsdt": 5.97,
+    "lockedSymbols": [
+      "BTCUSDT",
+      "ETHUSDT",
+      "XAUUSDT",
+      "NVDAUSDT",
+      "CLUSDT"
+    ],
+    "dataSource": "BINANCE_LIVE_API"
+  },
+  "marketCorrelation": {
+    "avgVolatilityRatio": 1.27,
+    "correlationScore": 0.45,
+    "isCircuitBreakerActive": false,
+    "circuitBreakerReason": "🟢 各品种归一化波动率与市场关联度平稳，允许策略顺势捕捉趋势机会",
+    "safeLevelLeverage": 5,
+    "maxAllowedAccountPositions": 5,
+    "recommendedAction": "正常按动态权重与止盈止损开仓运行",
+    "lastEvaluatedTime": 1794542811461
+  },
+  "strategyScreener": [
+    {
+      "strategyKey": "pattern_price_action",
+      "strategyName": "全形态历史胜率自优引擎 (Adaptive Pattern Quant)",
+      "category": "全形态自优",
+      "tradesCount7d": 2,
+      "wins7d": 1,
+      "losses7d": 1,
+      "winRatePercent": 50,
+      "profitFactor": 1042.56,
+      "maxDrawdownPercent": 0,
+      "totalNetPnlUsdt": 10.42,
+      "score": 77,
+      "grade": "B",
+      "status": "ACTIVE_PASS",
+      "reason": "近 7 日 2 笔表现评级 B 级 (胜率 50.0%, 盈亏比 1042.56)，允许执行并按评级配置权重"
+    },
+    {
+      "strategyKey": "wyckoff_spring_utad",
+      "strategyName": "Wyckoff 弹簧破底洗盘 & UTAD 诱多猎杀形态",
+      "category": "流动性猎杀",
+      "tradesCount7d": 0,
+      "wins7d": 0,
+      "losses7d": 0,
+      "winRatePercent": 0,
+      "profitFactor": 1.5,
+      "maxDrawdownPercent": 0,
+      "totalNetPnlUsdt": 0,
+      "score": 74,
+      "grade": "B",
+      "status": "ACTIVE_PASS",
+      "reason": "策略已全线激活就绪，实时扫描 5 大主流合约 K 线形态与套利机会"
+    },
+    {
+      "strategyKey": "brooks_h2_l2",
+      "strategyName": "Al Brooks H2/L2 均线回踩二次确认形态",
+      "category": "回踩二次确认",
+      "tradesCount7d": 0,
+      "wins7d": 0,
+      "losses7d": 0,
+      "winRatePercent": 0,
+      "profitFactor": 1.5,
+      "maxDrawdownPercent": 0,
+      "totalNetPnlUsdt": 0,
+      "score": 74,
+      "grade": "B",
+      "status": "ACTIVE_PASS",
+      "reason": "策略已全线激活就绪，实时扫描 5 大主流合约 K 线形态与套利机会"
+    },
+    {
+      "strategyKey": "flag_breakout",
+      "strategyName": "经典牛旗 / 熊旗中继放量突破形态 (Bull & Bear Flag)",
+      "category": "顺势突破",
+      "tradesCount7d": 0,
+      "wins7d": 0,
+      "losses7d": 0,
+      "winRatePercent": 0,
+      "profitFactor": 1.5,
+      "maxDrawdownPercent": 0,
+      "totalNetPnlUsdt": 0,
+      "score": 74,
+      "grade": "B",
+      "status": "ACTIVE_PASS",
+      "reason": "策略已全线激活就绪，实时扫描 5 大主流合约 K 线形态与套利机会"
+    },
+    {
+      "strategyKey": "double_top_bottom",
+      "strategyName": "经典 W底 / M头 颈线放量突破形态",
+      "category": "经典几何反转",
+      "tradesCount7d": 0,
+      "wins7d": 0,
+      "losses7d": 0,
+      "winRatePercent": 0,
+      "profitFactor": 1.5,
+      "maxDrawdownPercent": 0,
+      "totalNetPnlUsdt": 0,
+      "score": 74,
+      "grade": "B",
+      "status": "ACTIVE_PASS",
+      "reason": "策略已全线激活就绪，实时扫描 5 大主流合约 K 线形态与套利机会"
+    }
+  ],
+  "portfolioAllocation": {
+    "vixLikeIndex": 57,
+    "volatilityRegime": "HIGH_CAUTION",
+    "totalExposureMultiplier": 0.72,
+    "maxConcurrentPositions": 3,
+    "coverageDescription": "🟠 较高波动预警 VIX-Index=57：风险敞口自动收缩至 72%，优选高信念标的防止插针损耗。",
+    "weights": [
+      {
+        "symbol": "BTCUSDT",
+        "targetWeightPercent": 21,
+        "volatilityPct": 53.7,
+        "regimeRole": "CORE_LEADER",
+        "sizingMultiplier": 0.73
+      },
+      {
+        "symbol": "ETHUSDT",
+        "targetWeightPercent": 16.2,
+        "volatilityPct": 69.6,
+        "regimeRole": "CORE_LEADER",
+        "sizingMultiplier": 0.67
+      },
+      {
+        "symbol": "XAUUSDT",
+        "targetWeightPercent": 20.9,
+        "volatilityPct": 53.9,
+        "regimeRole": "DEFENSIVE_HEDGE",
+        "sizingMultiplier": 0.73
+      },
+      {
+        "symbol": "NVDAUSDT",
+        "targetWeightPercent": 20.9,
+        "volatilityPct": 53.8,
+        "regimeRole": "ALPHA_SATELLITE",
+        "sizingMultiplier": 0.73
+      },
+      {
+        "symbol": "CLUSDT",
+        "targetWeightPercent": 20.9,
+        "volatilityPct": 53.8,
+        "regimeRole": "ALPHA_SATELLITE",
+        "sizingMultiplier": 0.73
+      }
+    ],
+    "lastUpdated": 1794542811461
+  },
+  "portfolioBasket": {
+    "enabled": true,
+    "positionsCount": 0,
+    "winningCount": 0,
+    "losingCount": 0,
+    "totalMarginUsed": 0,
+    "totalNotional": 0,
+    "grossUnrealizedPnl": 0,
+    "estimatedRoundTripFees": 0,
+    "estimatedSlippageBuffer": 0,
+    "netRealizablePnl": 0,
+    "netReturnOnMarginPercent": 0,
+    "peakNetRealizablePnl": 0,
+    "isTrailingActive": false,
+    "regimeAssessment": "NO_ACTION",
+    "shouldCloseAll": false,
+    "decisionReason": "当前无活跃持仓，组合篮子净利止盈待命中",
+    "cooldownActiveUntil": null,
+    "lastEvaluatedAt": 1794542811461
+  },
+  "arbitrageOpportunities": [
+    {
+      "id": "arb_XAUUSDT_NVDAUSDT",
+      "pairName": "XAU / NVDA",
+      "symbolA": "XAUUSDT",
+      "symbolB": "NVDAUSDT",
+      "strongSymbol": "XAUUSDT",
+      "weakSymbol": "NVDAUSDT",
+      "correlation": 1,
+      "spreadZScore": 1.31,
+      "halfLifeBars": 2,
+      "reversionSpeedLabel": "极快回归 (~2 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 100%，当前偏离 Z=1.31 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_BTCUSDT_NVDAUSDT",
+      "pairName": "BTC / NVDA",
+      "symbolA": "BTCUSDT",
+      "symbolB": "NVDAUSDT",
+      "strongSymbol": "BTCUSDT",
+      "weakSymbol": "NVDAUSDT",
+      "correlation": 0.98,
+      "spreadZScore": 0.82,
+      "halfLifeBars": 5,
+      "reversionSpeedLabel": "极快回归 (~5 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0.06,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 98%，当前偏离 Z=0.82 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_BTCUSDT_CLUSDT",
+      "pairName": "BTC / CL",
+      "symbolA": "BTCUSDT",
+      "symbolB": "CLUSDT",
+      "strongSymbol": "BTCUSDT",
+      "weakSymbol": "CLUSDT",
+      "correlation": 0.98,
+      "spreadZScore": 0.8,
+      "halfLifeBars": 5,
+      "reversionSpeedLabel": "极快回归 (~5 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0.06,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 98%，当前偏离 Z=0.80 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_BTCUSDT_XAUUSDT",
+      "pairName": "BTC / XAU",
+      "symbolA": "BTCUSDT",
+      "symbolB": "XAUUSDT",
+      "strongSymbol": "BTCUSDT",
+      "weakSymbol": "XAUUSDT",
+      "correlation": 0.98,
+      "spreadZScore": 0.78,
+      "halfLifeBars": 5,
+      "reversionSpeedLabel": "极快回归 (~5 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0.06,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 98%，当前偏离 Z=0.78 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_NVDAUSDT_CLUSDT",
+      "pairName": "NVDA / CL",
+      "symbolA": "NVDAUSDT",
+      "symbolB": "CLUSDT",
+      "strongSymbol": "CLUSDT",
+      "weakSymbol": "NVDAUSDT",
+      "correlation": 1,
+      "spreadZScore": -0.53,
+      "halfLifeBars": 2,
+      "reversionSpeedLabel": "极快回归 (~2 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 100%，当前偏离 Z=-0.53 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_XAUUSDT_CLUSDT",
+      "pairName": "XAU / CL",
+      "symbolA": "XAUUSDT",
+      "symbolB": "CLUSDT",
+      "strongSymbol": "XAUUSDT",
+      "weakSymbol": "CLUSDT",
+      "correlation": 1,
+      "spreadZScore": 0.31,
+      "halfLifeBars": 2,
+      "reversionSpeedLabel": "极快回归 (~2 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 100%，当前偏离 Z=0.31 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_ETHUSDT_NVDAUSDT",
+      "pairName": "ETH / NVDA",
+      "symbolA": "ETHUSDT",
+      "symbolB": "NVDAUSDT",
+      "strongSymbol": "ETHUSDT",
+      "weakSymbol": "NVDAUSDT",
+      "correlation": 0.86,
+      "spreadZScore": 0.16,
+      "halfLifeBars": 8,
+      "reversionSpeedLabel": "极快回归 (~8 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0.07,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 86%，当前偏离 Z=0.16 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_ETHUSDT_XAUUSDT",
+      "pairName": "ETH / XAU",
+      "symbolA": "ETHUSDT",
+      "symbolB": "XAUUSDT",
+      "strongSymbol": "ETHUSDT",
+      "weakSymbol": "XAUUSDT",
+      "correlation": 0.86,
+      "spreadZScore": 0.15,
+      "halfLifeBars": 8,
+      "reversionSpeedLabel": "极快回归 (~8 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0.07,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 86%，当前偏离 Z=0.15 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_ETHUSDT_CLUSDT",
+      "pairName": "ETH / CL",
+      "symbolA": "ETHUSDT",
+      "symbolB": "CLUSDT",
+      "strongSymbol": "ETHUSDT",
+      "weakSymbol": "CLUSDT",
+      "correlation": 0.86,
+      "spreadZScore": 0.15,
+      "halfLifeBars": 8,
+      "reversionSpeedLabel": "极快回归 (~8 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0.07,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 86%，当前偏离 Z=0.15 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    },
+    {
+      "id": "arb_BTCUSDT_ETHUSDT",
+      "pairName": "BTC / ETH",
+      "symbolA": "BTCUSDT",
+      "symbolB": "ETHUSDT",
+      "strongSymbol": "ETHUSDT",
+      "weakSymbol": "BTCUSDT",
+      "correlation": 0.87,
+      "spreadZScore": -0.02,
+      "halfLifeBars": 7,
+      "reversionSpeedLabel": "极快回归 (~7 根K线)",
+      "optimalEntryZScore": 1.85,
+      "expectedReversionPercent": 0.01,
+      "recommendedAction": "MONITORING",
+      "reason": "相关性 87%，当前偏离 Z=-0.02 (最优触发阈值 ±1.85)，持续追踪套利均值回归速率",
+      "isActionable": false,
+      "timestamp": 1794542802647
+    }
+  ],
+  "systemMetrics": {
+    "cpuUsagePercent": 6.3,
+    "totalMemoryMb": 1931,
+    "freeMemoryMb": 996,
+    "usedMemoryMb": 935,
+    "memoryUsagePercent": 48.4,
+    "processHeapUsedMb": 23.6,
+    "uptimeSeconds": 622
+  },
+  "learningGeneration": 2,
+  "patternLearningStats": [
+    {
+      "patternType": "WYCKOFF_SPRING",
+      "patternName": "Wyckoff 弹簧破底洗盘 (Spring)",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "WYCKOFF_UPTHRUST",
+      "patternName": "Wyckoff 诱多假突破出货 (UTAD)",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "BROOKS_H2_LONG",
+      "patternName": "Al Brooks H2 均线二次多头确认",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "BROOKS_L2_SHORT",
+      "patternName": "Al Brooks L2 均线二次受阻做空",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "BULL_FLAG",
+      "patternName": "经典牛旗中继爆发 (Bull Flag)",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "BEAR_FLAG",
+      "patternName": "经典熊旗中继破位 (Bear Flag)",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "W_BOTTOM",
+      "patternName": "W底颈线放量突破 (Double Bottom)",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "M_TOP",
+      "patternName": "M头颈线放量破位 (Double Top)",
+      "weight": 1,
+      "confidenceScore": 50,
+      "totalTrades": 0,
+      "wins": 0,
+      "losses": 0,
+      "winRate": 0,
+      "avgPnlUsdt": 0,
+      "totalNetPnlUsdt": 0,
+      "qualityScoreBoost": 0,
+      "adaptiveSizingMultiplier": 1,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (初始)",
+      "bestSession": "美盘高波爆发 (初始)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542189943
+    },
+    {
+      "patternType": "CROSS_SYMBOL_ARBITRAGE",
+      "patternName": "跨品种统计套利 (Cross-Symbol Arb)",
+      "weight": 1.12,
+      "confidenceScore": 57,
+      "totalTrades": 1,
+      "wins": 1,
+      "losses": 0,
+      "winRate": 100,
+      "avgPnlUsdt": 9.83,
+      "totalNetPnlUsdt": 9.83,
+      "qualityScoreBoost": 5,
+      "adaptiveSizingMultiplier": 1.12,
+      "timeframeStats": [
+        {
+          "timeframe": "5m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "timeframe": "15m",
+          "weight": 1.12,
+          "winRate": 100,
+          "totalTrades": 1,
+          "wins": 1
+        },
+        {
+          "timeframe": "30m",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "sessionStats": [
+        {
+          "sessionKey": "ASIA",
+          "sessionName": "亚盘低波震荡 (08:00-16:00)",
+          "weight": 1.12,
+          "winRate": 100,
+          "totalTrades": 1,
+          "wins": 1
+        },
+        {
+          "sessionKey": "EUROPE",
+          "sessionName": "欧盘趋势动能 (16:00-22:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "US",
+          "sessionName": "美盘高波爆发 (22:00-06:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        },
+        {
+          "sessionKey": "OVERNIGHT",
+          "sessionName": "尾盘平仓交割 (06:00-08:00)",
+          "weight": 1,
+          "winRate": 0,
+          "totalTrades": 0,
+          "wins": 0
+        }
+      ],
+      "bestTimeframe": "15m (胜率 100%)",
+      "bestSession": "亚盘低波震荡 (胜率 100%)",
+      "status": "LEARNING_ACTIVE",
+      "lastUpdated": 1794542400682
+    }
+  ],
+  "timeframeDiagnostic": {
+    "currentRegime": "NORMAL_TRENDING",
+    "regimeName": "🟢 稳健趋势波段 (Normal Trending)",
+    "regimeDescription": "大盘波幅平稳，趋势发散顺畅，突破与回踩模式均具备高可靠性。",
+    "volatilityIndexRatio": 1.27,
+    "recommendedTimeframe": "15m",
+    "recommendationReason": "当前市场处于【🟢】环境 (波动指数 1.27x)。综合历史胜率 (50%) 与该波段适配度 (96分)，系统诊断【15m】为最佳黄金分析周期。",
+    "rankings": [
+      {
+        "timeframe": "15m",
+        "rank": 1,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 96,
+        "isRecommended": true,
+        "regimeFitDescription": "黄金推荐: 15m 趋势与胜率最佳平衡点"
+      },
+      {
+        "timeframe": "30m",
+        "rank": 2,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 92,
+        "isRecommended": false,
+        "regimeFitDescription": "推荐: 30m 趋势稳定性强，盈亏比极佳"
+      },
+      {
+        "timeframe": "1h",
+        "rank": 3,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 85,
+        "isRecommended": false,
+        "regimeFitDescription": "1h 适合中线趋势追踪"
+      },
+      {
+        "timeframe": "5m",
+        "rank": 4,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 82,
+        "isRecommended": false,
+        "regimeFitDescription": "5m 响应迅速，适合捕获趋势启动"
+      },
+      {
+        "timeframe": "4h",
+        "rank": 5,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 78,
+        "isRecommended": false,
+        "regimeFitDescription": "4h 趋势方向极度明确"
+      },
+      {
+        "timeframe": "1d",
+        "rank": 6,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 70,
+        "isRecommended": false,
+        "regimeFitDescription": "1d 周期较长，适合大方向对齐"
+      },
+      {
+        "timeframe": "3m",
+        "rank": 7,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 60,
+        "isRecommended": false,
+        "regimeFitDescription": "3m 适合高频短线回调确认"
+      },
+      {
+        "timeframe": "1m",
+        "rank": 8,
+        "totalTrades": 0,
+        "wins": 0,
+        "winRate": 50,
+        "avgPnlUsdt": 0,
+        "totalNetPnlUsdt": 0,
+        "volatilitySuitabilityScore": 40,
+        "isRecommended": false,
+        "regimeFitDescription": "1m 交易手续费消耗较大"
+      }
+    ]
+  },
+  "monitoredSymbols": [
+    "BTCUSDT",
+    "ETHUSDT",
+    "XAUUSDT",
+    "NVDAUSDT",
+    "CLUSDT"
+  ],
+  "monitoredTimeframes": [
+    "5m",
+    "15m",
+    "30m"
+  ],
+  "riskConfig": {
+    "slMode": "ATR",
+    "slPercent": 1.5,
+    "slAtrMultiplier": 1.8,
+    "tpMode": "RISK_REWARD",
+    "tpPercent": 3.5,
+    "tpRiskRewardRatio": 2.2,
+    "useTrailingStop": true,
+    "trailingActivationPercent": 0.8,
+    "trailingCallbackPercent": 0.45,
+    "trailingStepPercent": 0.5,
+    "trailingActivationUsdt": 25,
+    "autoBreakevenEnabled": true,
+    "autoBreakevenDynamicPercent": 0.8,
+    "autoBreakevenUsdt": 15,
+    "notification": {
+      "enableEmergencyAlerts": true,
+      "telegramBotToken": "",
+      "telegramChatId": "",
+      "webhookUrl": ""
+    },
+    "portfolioBasket": {
+      "enabled": true,
+      "minNetProfitPercent": 1.5,
+      "minNetProfitUsdt": 1,
+      "takerFeeRate": 0.0005,
+      "slippageBufferRate": 0.0005,
+      "trailingRetracePercent": 30,
+      "cooldownMinutes": 20
+    },
+    "sizingMode": "EQUITY_PERCENT",
+    "positionSizePercent": 20,
+    "fixedAmountUSDT": 1000,
+    "riskPerTradePercent": 2,
+    "leverage": 5,
+    "maxAllowedDrawdownPercent": 20
+  },
+  "activePositions": [],
+  "closedTrades": [
+    {
+      "id": "binance_fill_ETHUSDT_8389766315671279000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794537671721,
+      "exitTime": 1794537671721,
+      "entryPrice": 0,
+      "exitPrice": 1993.25,
+      "quantity": 0.054,
+      "leverage": 5,
+      "marginUsed": 21.53,
+      "netPnl": -0.1111,
+      "pnlPercent": -0.52,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315671432000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794537679364,
+      "exitTime": 1794537679364,
+      "entryPrice": 0,
+      "exitPrice": 1994.87,
+      "quantity": 0.032,
+      "leverage": 5,
+      "marginUsed": 12.77,
+      "netPnl": -0.1177,
+      "pnlPercent": -0.92,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_BTCUSDT_1194001723318",
+      "symbol": "BTCUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794537689547,
+      "exitTime": 1794537689547,
+      "entryPrice": 0,
+      "exitPrice": 70331.5,
+      "quantity": 0.001,
+      "leverage": 5,
+      "marginUsed": 14.07,
+      "netPnl": -0.1147,
+      "pnlPercent": -0.82,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315677705000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538099372,
+      "exitTime": 1794538099372,
+      "entryPrice": 0,
+      "exitPrice": 1991.95,
+      "quantity": 0.019,
+      "leverage": 5,
+      "marginUsed": 7.57,
+      "netPnl": -0.0144,
+      "pnlPercent": -0.19,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315677865000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538110038,
+      "exitTime": 1794538110038,
+      "entryPrice": 0,
+      "exitPrice": 1992.6,
+      "quantity": 0.012,
+      "leverage": 5,
+      "marginUsed": 4.78,
+      "netPnl": -0.0169,
+      "pnlPercent": -0.35,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315678015000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538119489,
+      "exitTime": 1794538119489,
+      "entryPrice": 0,
+      "exitPrice": 1992.73,
+      "quantity": 0.007,
+      "leverage": 5,
+      "marginUsed": 2.79,
+      "netPnl": -0.0108,
+      "pnlPercent": -0.39,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315678609000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538169382,
+      "exitTime": 1794538169382,
+      "entryPrice": 0,
+      "exitPrice": 1990.42,
+      "quantity": 0.004,
+      "leverage": 5,
+      "marginUsed": 1.59,
+      "netPnl": 0.0031,
+      "pnlPercent": 0.19,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315678713000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538179416,
+      "exitTime": 1794538179416,
+      "entryPrice": 0,
+      "exitPrice": 1990.14,
+      "quantity": 0.002,
+      "leverage": 5,
+      "marginUsed": 0.8,
+      "netPnl": 0.0021,
+      "pnlPercent": 0.27,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315678856000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538191086,
+      "exitTime": 1794538191086,
+      "entryPrice": 0,
+      "exitPrice": 1989.88,
+      "quantity": 0.002,
+      "leverage": 5,
+      "marginUsed": 0.8,
+      "netPnl": 0.0026,
+      "pnlPercent": 0.33,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315679153000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538209432,
+      "exitTime": 1794538209432,
+      "entryPrice": 0,
+      "exitPrice": 1989.28,
+      "quantity": 0.001,
+      "leverage": 5,
+      "marginUsed": 0.4,
+      "netPnl": 0.0019,
+      "pnlPercent": 0.48,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315682588000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794538419567,
+      "exitTime": 1794538419567,
+      "entryPrice": 0,
+      "exitPrice": 1985.06,
+      "quantity": 0.002,
+      "leverage": 5,
+      "marginUsed": 0.79,
+      "netPnl": 0.0123,
+      "pnlPercent": 1.55,
+      "peakPnlUsdt": 0.01,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_NVDAUSDT_1701000775",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794539563504,
+      "exitTime": 1794539563504,
+      "entryPrice": 0,
+      "exitPrice": 165.66,
+      "quantity": 1.48,
+      "leverage": 5,
+      "marginUsed": 49.04,
+      "netPnl": 0.2275,
+      "pnlPercent": 0.46,
+      "peakPnlUsdt": 0.23,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_BTCUSDT_1194035572196",
+      "symbol": "BTCUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794539563504,
+      "exitTime": 1794539563504,
+      "entryPrice": 0,
+      "exitPrice": 69964.7,
+      "quantity": 0.002,
+      "leverage": 5,
+      "marginUsed": 27.99,
+      "netPnl": 0.5046,
+      "pnlPercent": 1.8,
+      "peakPnlUsdt": 0.5,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_XAUUSDT_23270961332",
+      "symbol": "XAUUSDT",
+      "interval": "LIVE",
+      "side": "LONG",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794539563507,
+      "exitTime": 1794539563507,
+      "entryPrice": 0,
+      "exitPrice": 3925.94,
+      "quantity": 0.1,
+      "leverage": 5,
+      "marginUsed": 78.52,
+      "netPnl": 0.736,
+      "pnlPercent": 0.94,
+      "peakPnlUsdt": 0.74,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315709301000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794540174452,
+      "exitTime": 1794540174452,
+      "entryPrice": 0,
+      "exitPrice": 1954.29,
+      "quantity": 0.124,
+      "leverage": 5,
+      "marginUsed": 48.47,
+      "netPnl": 0.75,
+      "pnlPercent": 1.55,
+      "peakPnlUsdt": 0.75,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_XAUUSDT_23272570733",
+      "symbol": "XAUUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794540309578,
+      "exitTime": 1794540309578,
+      "entryPrice": 0,
+      "exitPrice": 3920.71,
+      "quantity": 0.103,
+      "leverage": 5,
+      "marginUsed": 80.77,
+      "netPnl": -0.1512,
+      "pnlPercent": -0.19,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_ETHUSDT_8389766315711859000",
+      "symbol": "ETHUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794540309581,
+      "exitTime": 1794540309581,
+      "entryPrice": 0,
+      "exitPrice": 1958.47,
+      "quantity": 0.129,
+      "leverage": 5,
+      "marginUsed": 50.53,
+      "netPnl": 0.2408,
+      "pnlPercent": 0.48,
+      "peakPnlUsdt": 0.24,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_XAUUSDT_23274329762",
+      "symbol": "XAUUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541228480,
+      "exitTime": 1794541228480,
+      "entryPrice": 0,
+      "exitPrice": 3929.02,
+      "quantity": 0.042,
+      "leverage": 5,
+      "marginUsed": 33,
+      "netPnl": -0.0664,
+      "pnlPercent": -0.2,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_NVDAUSDT_1701875135",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541229757,
+      "exitTime": 1794541229757,
+      "entryPrice": 0,
+      "exitPrice": 164.26,
+      "quantity": 1.01,
+      "leverage": 5,
+      "marginUsed": 33.18,
+      "netPnl": -0.0605,
+      "pnlPercent": -0.18,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_CLUSDT_6733845183",
+      "symbol": "CLUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541231029,
+      "exitTime": 1794541231029,
+      "entryPrice": 0,
+      "exitPrice": 87.28,
+      "quantity": 1.92,
+      "leverage": 5,
+      "marginUsed": 33.52,
+      "netPnl": -0.0862,
+      "pnlPercent": -0.26,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_XAUUSDT_23274367270",
+      "symbol": "XAUUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541249193,
+      "exitTime": 1794541249193,
+      "entryPrice": 0,
+      "exitPrice": 3927.01,
+      "quantity": 0.042,
+      "leverage": 5,
+      "marginUsed": 32.99,
+      "netPnl": -0.0664,
+      "pnlPercent": -0.2,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_NVDAUSDT_1701881470",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541250230,
+      "exitTime": 1794541250230,
+      "entryPrice": 0,
+      "exitPrice": 164.1,
+      "quantity": 1.01,
+      "leverage": 5,
+      "marginUsed": 33.15,
+      "netPnl": -0.0764,
+      "pnlPercent": -0.23,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_CLUSDT_6733846784",
+      "symbol": "CLUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541251270,
+      "exitTime": 1794541251270,
+      "entryPrice": 0,
+      "exitPrice": 87.29,
+      "quantity": 1.92,
+      "leverage": 5,
+      "marginUsed": 33.52,
+      "netPnl": -0.0862,
+      "pnlPercent": -0.26,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_NVDAUSDT_1701882298",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541252717,
+      "exitTime": 1794541252717,
+      "entryPrice": 0,
+      "exitPrice": 164.08,
+      "quantity": 0.75,
+      "leverage": 5,
+      "marginUsed": 24.61,
+      "netPnl": -0.0567,
+      "pnlPercent": -0.23,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_CLUSDT_6733850336",
+      "symbol": "CLUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541269311,
+      "exitTime": 1794541269311,
+      "entryPrice": 0,
+      "exitPrice": 87.28,
+      "quantity": 1.91,
+      "leverage": 5,
+      "marginUsed": 33.34,
+      "netPnl": -0.0858,
+      "pnlPercent": -0.26,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_NVDAUSDT_1701915535",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541289768,
+      "exitTime": 1794541289768,
+      "entryPrice": 0,
+      "exitPrice": 163.85,
+      "quantity": 0.4,
+      "leverage": 5,
+      "marginUsed": 13.11,
+      "netPnl": -0.0302,
+      "pnlPercent": -0.23,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_CLUSDT_6733860199",
+      "symbol": "CLUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541291061,
+      "exitTime": 1794541291061,
+      "entryPrice": 0,
+      "exitPrice": 87.27,
+      "quantity": 0.76,
+      "leverage": 5,
+      "marginUsed": 13.27,
+      "netPnl": -0.0341,
+      "pnlPercent": -0.26,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_CLUSDT_6733860322",
+      "symbol": "CLUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541300208,
+      "exitTime": 1794541300208,
+      "entryPrice": 0,
+      "exitPrice": 87.27,
+      "quantity": 1.42,
+      "leverage": 5,
+      "marginUsed": 24.78,
+      "netPnl": -0.0638,
+      "pnlPercent": -0.26,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_NVDAUSDT_1701918814",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "LONG",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541300893,
+      "exitTime": 1794541300893,
+      "entryPrice": 0,
+      "exitPrice": 163.95,
+      "quantity": 0.3,
+      "leverage": 5,
+      "marginUsed": 9.84,
+      "netPnl": -0.0287,
+      "pnlPercent": -0.29,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_BTCUSDT_1194071375753",
+      "symbol": "BTCUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541392759,
+      "exitTime": 1794541392759,
+      "entryPrice": 0,
+      "exitPrice": 69162.1,
+      "quantity": 0.002,
+      "leverage": 5,
+      "marginUsed": 27.66,
+      "netPnl": -0.266,
+      "pnlPercent": -0.96,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_NVDAUSDT_1701968922",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "LONG",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541392760,
+      "exitTime": 1794541392760,
+      "entryPrice": 0,
+      "exitPrice": 164.08,
+      "quantity": 0.45,
+      "leverage": 5,
+      "marginUsed": 14.77,
+      "netPnl": 0.0155,
+      "pnlPercent": 0.1,
+      "peakPnlUsdt": 0.02,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "binance_fill_XAUUSDT_23274611329",
+      "symbol": "XAUUSDT",
+      "interval": "LIVE",
+      "side": "LONG",
+      "patternType": "BINANCE_ACCOUNT_FILL",
+      "patternName": "实盘历史交割单 (Binance Fill)",
+      "entryTime": 1794541392760,
+      "exitTime": 1794541392760,
+      "entryPrice": 0,
+      "exitPrice": 3925.82,
+      "quantity": 0.031,
+      "leverage": 5,
+      "marginUsed": 24.34,
+      "netPnl": -0.0853,
+      "pnlPercent": -0.35,
+      "peakPnlUsdt": 0,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false,
+      "isExternalExchangeTrade": true
+    },
+    {
+      "id": "live_CLUSDT_1794542390463",
+      "symbol": "CLUSDT",
+      "interval": "LIVE",
+      "side": "SHORT",
+      "patternType": "EXTERNAL_POSITION",
+      "patternName": "币安已建仓位",
+      "entryTime": 1794542390463,
+      "exitTime": 1794542793058,
+      "entryPrice": 87.24,
+      "exitPrice": 79.83,
+      "quantity": 1.41,
+      "leverage": 3,
+      "marginUsed": 41.0028,
+      "netPnl": 10.425587939999994,
+      "pnlPercent": 25.426526822558444,
+      "peakPnlUsdt": -0.18713958,
+      "reversionUsdt": 0,
+      "volatilityLevel": "EXTREME",
+      "exitReason": "TAKE_PROFIT",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false
+    },
+    {
+      "id": "live_NVDAUSDT_1794542389780",
+      "symbol": "NVDAUSDT",
+      "interval": "LIVE",
+      "side": "LONG",
+      "patternType": "EXTERNAL_POSITION",
+      "patternName": "币安已建仓位",
+      "entryTime": 1794542389780,
+      "exitTime": 1794542793314,
+      "entryPrice": 164.14,
+      "exitPrice": 164.12,
+      "quantity": 0.74,
+      "leverage": 3,
+      "marginUsed": 40.4879,
+      "netPnl": -0.01,
+      "pnlPercent": -0.04,
+      "peakPnlUsdt": -0.0148,
+      "reversionUsdt": 0,
+      "volatilityLevel": "NORMAL",
+      "exitReason": "STOP_LOSS",
+      "strategyUsed": "pattern_price_action",
+      "isPaper": false
+    }
+  ],
+  "logs": [
+    {
+      "id": "log_1794542805142_a9or",
+      "time": "12:06:45 PM",
+      "timestamp": 1794542805142,
+      "level": "error",
+      "category": "API",
+      "message": "❌ [币安实盘同步失败] [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API. (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)"
+    },
+    {
+      "id": "log_1794542793314_5wuj",
+      "time": "12:06:33 PM",
+      "timestamp": 1794542793314,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [交易所触发平仓同步] NVDAUSDT (LONG) 已在币安实盘完成平仓，损益约 $-0.01 USDT，正在拉取真实交割流水",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542793058_mwk2",
+      "time": "12:06:33 PM",
+      "timestamp": 1794542793058,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.83 USDT | 原因: TAKE_PROFIT | 净损益: +10.43 USDT (+25.43%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542793058_ghif",
+      "time": "12:06:33 PM",
+      "timestamp": 1794542793058,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542792623_8fmq",
+      "time": "12:06:32 PM",
+      "timestamp": 1794542792623,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.83 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542792388_3ulo",
+      "time": "12:06:32 PM",
+      "timestamp": 1794542792388,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.09 USDT | 原因: STOP_LOSS | 净损益: -9.71 USDT (-23.99%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542792388_k6gm",
+      "time": "12:06:32 PM",
+      "timestamp": 1794542792388,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542791933_ncc6",
+      "time": "12:06:31 PM",
+      "timestamp": 1794542791933,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.09 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542783221_s8fa",
+      "time": "12:06:23 PM",
+      "timestamp": 1794542783221,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542782857_3qq6",
+      "time": "12:06:22 PM",
+      "timestamp": 1794542782857,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "💓 [系统心跳存活自检 OK] 模式: LIVE实盘 | 监控 5 个合约 (5m/15m/30m) | 盘面: [BTC: 🔴空头主跌 ($68,890.6) | ETH: 🔴空头主跌 ($1,937.45) | XAU: 🔴空头主跌 ($3,688.91) | NVDA: 🔴空头主跌 ($155.28) | CL: 🔴空头主跌 ($82.06)] | 活跃持仓: 1 笔 | 净值: $298.48"
+    },
+    {
+      "id": "log_1794542782856_ytf8",
+      "time": "12:06:22 PM",
+      "timestamp": 1794542782856,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 80.02 USDT | 原因: TAKE_PROFIT | 净损益: +10.16 USDT (+24.77%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542782856_ab7n",
+      "time": "12:06:22 PM",
+      "timestamp": 1794542782856,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542782421_xtx6",
+      "time": "12:06:22 PM",
+      "timestamp": 1794542782421,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 80.02 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542782189_vjol",
+      "time": "12:06:22 PM",
+      "timestamp": 1794542782189,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.41 USDT | 原因: STOP_LOSS | 净损益: -9.48 USDT (-23.41%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542782188_khwt",
+      "time": "12:06:22 PM",
+      "timestamp": 1794542782188,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542781718_vkqu",
+      "time": "12:06:21 PM",
+      "timestamp": 1794542781718,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.41 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542773159_0dk7",
+      "time": "12:06:13 PM",
+      "timestamp": 1794542773159,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542772801_vxul",
+      "time": "12:06:12 PM",
+      "timestamp": 1794542772801,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.96 USDT | 原因: TAKE_PROFIT | 净损益: +10.24 USDT (+24.98%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542772801_i410",
+      "time": "12:06:12 PM",
+      "timestamp": 1794542772801,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542772207_feai",
+      "time": "12:06:12 PM",
+      "timestamp": 1794542772207,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.96 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542771972_xez9",
+      "time": "12:06:11 PM",
+      "timestamp": 1794542771972,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.29 USDT | 原因: STOP_LOSS | 净损益: -9.56 USDT (-23.62%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542771972_u59d",
+      "time": "12:06:11 PM",
+      "timestamp": 1794542771972,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542771531_1qew",
+      "time": "12:06:11 PM",
+      "timestamp": 1794542771531,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.29 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542770360_xi1v",
+      "time": "12:06:10 PM",
+      "timestamp": 1794542770360,
+      "level": "success",
+      "category": "SYSTEM",
+      "message": "▶ 启动全自动监控与胜率自优服务 | 监控币种: BTCUSDT, ETHUSDT, XAUUSDT, NVDAUSDT, CLUSDT | 监控周期: 5m, 15m, 30m | 模式: 🟢 币安实盘 API 下单"
+    },
+    {
+      "id": "log_1794542760251_fitd",
+      "time": "12:06:00 PM",
+      "timestamp": 1794542760251,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.68 | 可用保证金: $217.03 | 实时净值: $298.52 | 浮动盈亏: $-0.15 USDT"
+    },
+    {
+      "id": "log_1794542745137_80wl",
+      "time": "12:05:45 PM",
+      "timestamp": 1794542745137,
+      "level": "error",
+      "category": "API",
+      "message": "❌ [币安实盘同步失败] [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API. (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)"
+    },
+    {
+      "id": "log_1794542726467_k81z",
+      "time": "12:05:26 PM",
+      "timestamp": 1794542726467,
+      "level": "warn",
+      "category": "SYSTEM",
+      "message": "⏸ 多币种监控已暂停"
+    },
+    {
+      "id": "log_1794542721208_w4hy",
+      "time": "12:05:21 PM",
+      "timestamp": 1794542721208,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542720705_xtt6",
+      "time": "12:05:20 PM",
+      "timestamp": 1794542720705,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 80.12 USDT | 原因: TAKE_PROFIT | 净损益: +10.02 USDT (+24.43%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542720705_uj0o",
+      "time": "12:05:20 PM",
+      "timestamp": 1794542720705,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542720146_fyps",
+      "time": "12:05:20 PM",
+      "timestamp": 1794542720146,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 80.12 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542719889_72pp",
+      "time": "12:05:19 PM",
+      "timestamp": 1794542719889,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.61 USDT | 原因: STOP_LOSS | 净损益: -9.33 USDT (-23.04%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542719889_haoc",
+      "time": "12:05:19 PM",
+      "timestamp": 1794542719889,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542719448_1e3r",
+      "time": "12:05:19 PM",
+      "timestamp": 1794542719448,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.61 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542711784_jwpq",
+      "time": "12:05:11 PM",
+      "timestamp": 1794542711784,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542711430_prhl",
+      "time": "12:05:11 PM",
+      "timestamp": 1794542711430,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 80.06 USDT | 原因: TAKE_PROFIT | 净损益: +10.10 USDT (+24.64%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542711430_hux9",
+      "time": "12:05:11 PM",
+      "timestamp": 1794542711430,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542710761_0ch9",
+      "time": "12:05:10 PM",
+      "timestamp": 1794542710761,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 80.06 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542710529_z72a",
+      "time": "12:05:10 PM",
+      "timestamp": 1794542710529,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.47 USDT | 原因: STOP_LOSS | 净损益: -9.43 USDT (-23.30%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542710529_2t2m",
+      "time": "12:05:10 PM",
+      "timestamp": 1794542710529,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542709870_bszp",
+      "time": "12:05:09 PM",
+      "timestamp": 1794542709870,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.47 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542701662_b99f",
+      "time": "12:05:01 PM",
+      "timestamp": 1794542701662,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542700763_ylyw",
+      "time": "12:05:00 PM",
+      "timestamp": 1794542700763,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.91 USDT | 原因: TAKE_PROFIT | 净损益: +10.31 USDT (+25.15%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542700763_bvj4",
+      "time": "12:05:00 PM",
+      "timestamp": 1794542700763,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542700547_opzp",
+      "time": "12:05:00 PM",
+      "timestamp": 1794542700547,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542700248_cs1k",
+      "time": "12:05:00 PM",
+      "timestamp": 1794542700248,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.91 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542700230_3qsz",
+      "time": "12:05:00 PM",
+      "timestamp": 1794542700230,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.67 | 可用保证金: $217.00 | 实时净值: $298.49 | 浮动盈亏: $-0.19 USDT"
+    },
+    {
+      "id": "log_1794542680316_g666",
+      "time": "12:04:40 PM",
+      "timestamp": 1794542680316,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "💓 [系统心跳存活自检 OK] 模式: LIVE实盘 | 监控 5 个合约 (5m/15m/30m) | 盘面: [BTC: 🔴空头主跌 ($68,966.42) | ETH: 🔴空头主跌 ($1,939.27) | XAU: 🔴空头主跌 ($3,680.71) | NVDA: 🔴空头主跌 ($154.92) | CL: 🔴空头主跌 ($81.87)] | 活跃持仓: 0 笔 | 净值: $298.44"
+    },
+    {
+      "id": "log_1794542675122_o3jg",
+      "time": "12:04:35 PM",
+      "timestamp": 1794542675122,
+      "level": "error",
+      "category": "API",
+      "message": "❌ [币安实盘同步失败] [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API. (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)"
+    },
+    {
+      "id": "log_1794542670219_7iah",
+      "time": "12:04:30 PM",
+      "timestamp": 1794542670219,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.66 | 可用保证金: $216.95 | 实时净值: $298.44 | 浮动盈亏: $-0.22 USDT"
+    },
+    {
+      "id": "log_1794542670213_cxvx",
+      "time": "12:04:30 PM",
+      "timestamp": 1794542670213,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.9 USDT | 原因: TAKE_PROFIT | 净损益: +10.33 USDT (+25.19%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542670058_8uh1",
+      "time": "12:04:30 PM",
+      "timestamp": 1794542670058,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.9 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542669823_zbta",
+      "time": "12:04:29 PM",
+      "timestamp": 1794542669823,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.2 USDT | 原因: STOP_LOSS | 净损益: -9.63 USDT (-23.79%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542669823_cqv4",
+      "time": "12:04:29 PM",
+      "timestamp": 1794542669823,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542669384_qovn",
+      "time": "12:04:29 PM",
+      "timestamp": 1794542669384,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.2 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542665428_660e",
+      "time": "12:04:25 PM",
+      "timestamp": 1794542665428,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542660562_is9v",
+      "time": "12:04:20 PM",
+      "timestamp": 1794542660562,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542660547_kly0",
+      "time": "12:04:20 PM",
+      "timestamp": 1794542660547,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.99 USDT | 原因: TAKE_PROFIT | 净损益: +10.20 USDT (+24.88%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542660547_xa5s",
+      "time": "12:04:20 PM",
+      "timestamp": 1794542660547,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542660109_kwen",
+      "time": "12:04:20 PM",
+      "timestamp": 1794542660109,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.99 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542659853_qo8c",
+      "time": "12:04:19 PM",
+      "timestamp": 1794542659853,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.36 USDT | 原因: STOP_LOSS | 净损益: -9.51 USDT (-23.50%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542659853_we6t",
+      "time": "12:04:19 PM",
+      "timestamp": 1794542659853,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542659418_cyqz",
+      "time": "12:04:19 PM",
+      "timestamp": 1794542659418,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.36 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542650818_56fd",
+      "time": "12:04:10 PM",
+      "timestamp": 1794542650818,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542650461_1n7c",
+      "time": "12:04:10 PM",
+      "timestamp": 1794542650461,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.99 USDT | 原因: TAKE_PROFIT | 净损益: +10.20 USDT (+24.88%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542650461_e3vk",
+      "time": "12:04:10 PM",
+      "timestamp": 1794542650461,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542650022_hx6l",
+      "time": "12:04:10 PM",
+      "timestamp": 1794542650022,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.99 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542649788_ys2z",
+      "time": "12:04:09 PM",
+      "timestamp": 1794542649788,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.32 USDT | 原因: STOP_LOSS | 净损益: -9.54 USDT (-23.57%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542649788_ic9o",
+      "time": "12:04:09 PM",
+      "timestamp": 1794542649788,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542649363_pk1g",
+      "time": "12:04:09 PM",
+      "timestamp": 1794542649363,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.32 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542641257_2k9e",
+      "time": "12:04:01 PM",
+      "timestamp": 1794542641257,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542640896_4c1e",
+      "time": "12:04:00 PM",
+      "timestamp": 1794542640896,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.88 USDT | 原因: TAKE_PROFIT | 净损益: +10.36 USDT (+25.25%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542640896_b7d8",
+      "time": "12:04:00 PM",
+      "timestamp": 1794542640896,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542640473_tvtd",
+      "time": "12:04:00 PM",
+      "timestamp": 1794542640473,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542640304_1ezt",
+      "time": "12:04:00 PM",
+      "timestamp": 1794542640304,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.88 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542640292_jp2d",
+      "time": "12:04:00 PM",
+      "timestamp": 1794542640292,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.69 | 可用保证金: $216.97 | 实时净值: $298.44 | 浮动盈亏: $-0.25 USDT"
+    },
+    {
+      "id": "log_1794542620387_mggx",
+      "time": "12:03:40 PM",
+      "timestamp": 1794542620387,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "💓 [系统心跳存活自检 OK] 模式: LIVE实盘 | 监控 5 个合约 (5m/15m/30m) | 盘面: [BTC: 🔴空头主跌 ($68,920.01) | ETH: 🔴空头主跌 ($1,938) | XAU: 🔴空头主跌 ($3,678.18) | NVDA: 🔴空头主跌 ($154.82) | CL: 🔴空头主跌 ($81.84)] | 活跃持仓: 0 笔 | 净值: $298.31"
+    },
+    {
+      "id": "log_1794542610267_fyql",
+      "time": "12:03:30 PM",
+      "timestamp": 1794542610268,
+      "level": "error",
+      "category": "API",
+      "message": "❌ [币安实盘同步失败] [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API. (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)"
+    },
+    {
+      "id": "log_1794542610192_rv6i",
+      "time": "12:03:30 PM",
+      "timestamp": 1794542610192,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.76 USDT | 原因: TAKE_PROFIT | 净损益: +10.52 USDT (+25.67%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542610041_r9ja",
+      "time": "12:03:30 PM",
+      "timestamp": 1794542610041,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.76 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542609809_5oxx",
+      "time": "12:03:29 PM",
+      "timestamp": 1794542609809,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 150.88 USDT | 原因: STOP_LOSS | 净损益: -9.87 USDT (-24.37%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542609809_os9x",
+      "time": "12:03:29 PM",
+      "timestamp": 1794542609809,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 12 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542609373_zoq1",
+      "time": "12:03:29 PM",
+      "timestamp": 1794542609373,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 150.88 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542601016_6vo7",
+      "time": "12:03:21 PM",
+      "timestamp": 1794542601016,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542600514_7bb2",
+      "time": "12:03:20 PM",
+      "timestamp": 1794542600514,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.87 USDT | 原因: TAKE_PROFIT | 净损益: +10.37 USDT (+25.29%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542600514_u8to",
+      "time": "12:03:20 PM",
+      "timestamp": 1794542600514,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542600464_x4of",
+      "time": "12:03:20 PM",
+      "timestamp": 1794542600464,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542600068_iaau",
+      "time": "12:03:20 PM",
+      "timestamp": 1794542600068,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.87 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542599833_u13g",
+      "time": "12:03:19 PM",
+      "timestamp": 1794542599833,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.08 USDT | 原因: STOP_LOSS | 净损益: -9.72 USDT (-24.01%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542599833_agup",
+      "time": "12:03:19 PM",
+      "timestamp": 1794542599833,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542599380_lggc",
+      "time": "12:03:19 PM",
+      "timestamp": 1794542599380,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.08 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542591389_2ok7",
+      "time": "12:03:11 PM",
+      "timestamp": 1794542591389,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542591033_s0ys",
+      "time": "12:03:11 PM",
+      "timestamp": 1794542591033,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.91 USDT | 原因: TAKE_PROFIT | 净损益: +10.31 USDT (+25.15%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542591033_i78m",
+      "time": "12:03:11 PM",
+      "timestamp": 1794542591033,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542590516_9nw9",
+      "time": "12:03:10 PM",
+      "timestamp": 1794542590516,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.91 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542590282_janz",
+      "time": "12:03:10 PM",
+      "timestamp": 1794542590282,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.17 USDT | 原因: STOP_LOSS | 净损益: -9.65 USDT (-23.84%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542590282_9ux2",
+      "time": "12:03:10 PM",
+      "timestamp": 1794542590282,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542589365_lp0a",
+      "time": "12:03:09 PM",
+      "timestamp": 1794542589365,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.17 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542581443_mhms",
+      "time": "12:03:01 PM",
+      "timestamp": 1794542581443,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542581083_ioxg",
+      "time": "12:03:01 PM",
+      "timestamp": 1794542581083,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.73 USDT | 原因: TAKE_PROFIT | 净损益: +10.57 USDT (+25.77%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542581083_h4u5",
+      "time": "12:03:01 PM",
+      "timestamp": 1794542581083,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542580734_yw8g",
+      "time": "12:03:00 PM",
+      "timestamp": 1794542580734,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542580490_z90y",
+      "time": "12:03:00 PM",
+      "timestamp": 1794542580490,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.73 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542580439_a22g",
+      "time": "12:03:00 PM",
+      "timestamp": 1794542580439,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.62 | 可用保证金: $216.76 | 实时净值: $298.11 | 浮动盈亏: $-0.51 USDT"
+    },
+    {
+      "id": "log_1794542560448_23wt",
+      "time": "12:02:40 PM",
+      "timestamp": 1794542560448,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "💓 [系统心跳存活自检 OK] 模式: LIVE实盘 | 监控 5 个合约 (5m/15m/30m) | 盘面: [BTC: 🔴空头主跌 ($68,727.67) | ETH: 🔴空头主跌 ($1,929.61) | XAU: 🔴空头主跌 ($3,666.78) | NVDA: 🔴空头主跌 ($154.34) | CL: 🔴空头主跌 ($81.57)] | 活跃持仓: 0 笔 | 净值: $298.18"
+    },
+    {
+      "id": "log_1794542550234_2jmt",
+      "time": "12:02:30 PM",
+      "timestamp": 1794542550234,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.62 USDT | 原因: TAKE_PROFIT | 净损益: +10.72 USDT (+26.15%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542550234_cdj9",
+      "time": "12:02:30 PM",
+      "timestamp": 1794542550234,
+      "level": "error",
+      "category": "API",
+      "message": "❌ [币安实盘同步失败] [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API. (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)"
+    },
+    {
+      "id": "log_1794542550080_jn4y",
+      "time": "12:02:30 PM",
+      "timestamp": 1794542550080,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.62 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542549825_4o14",
+      "time": "12:02:29 PM",
+      "timestamp": 1794542549825,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 150.7 USDT | 原因: STOP_LOSS | 净损益: -10.00 USDT (-24.70%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542549398_gsjl",
+      "time": "12:02:29 PM",
+      "timestamp": 1794542549398,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 150.7 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542540839_l2gm",
+      "time": "12:02:20 PM",
+      "timestamp": 1794542540839,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542540487_rg8q",
+      "time": "12:02:20 PM",
+      "timestamp": 1794542540487,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.72 USDT | 原因: TAKE_PROFIT | 净损益: +10.58 USDT (+25.80%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542540487_j73o",
+      "time": "12:02:20 PM",
+      "timestamp": 1794542540487,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542540395_0ljr",
+      "time": "12:02:20 PM",
+      "timestamp": 1794542540395,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542540035_7ya8",
+      "time": "12:02:20 PM",
+      "timestamp": 1794542540035,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.72 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542539805_yozs",
+      "time": "12:02:19 PM",
+      "timestamp": 1794542539805,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 150.9 USDT | 原因: STOP_LOSS | 净损益: -9.85 USDT (-24.34%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542539805_paay",
+      "time": "12:02:19 PM",
+      "timestamp": 1794542539805,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542539346_vwt5",
+      "time": "12:02:19 PM",
+      "timestamp": 1794542539346,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 150.9 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542530924_av53",
+      "time": "12:02:10 PM",
+      "timestamp": 1794542530924,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542530567_qlo1",
+      "time": "12:02:10 PM",
+      "timestamp": 1794542530567,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.8 USDT | 原因: TAKE_PROFIT | 净损益: +10.47 USDT (+25.53%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542530567_7esr",
+      "time": "12:02:10 PM",
+      "timestamp": 1794542530567,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542530394_srqb",
+      "time": "12:02:10 PM",
+      "timestamp": 1794542530394,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542530125_fpkg",
+      "time": "12:02:10 PM",
+      "timestamp": 1794542530125,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.8 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542529868_mcwz",
+      "time": "12:02:09 PM",
+      "timestamp": 1794542529868,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 150.98 USDT | 原因: STOP_LOSS | 净损益: -9.79 USDT (-24.19%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542529868_jpd5",
+      "time": "12:02:09 PM",
+      "timestamp": 1794542529868,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542529409_tou0",
+      "time": "12:02:09 PM",
+      "timestamp": 1794542529409,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 150.98 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542521402_r7ts",
+      "time": "12:02:01 PM",
+      "timestamp": 1794542521402,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542520908_rhxx",
+      "time": "12:02:00 PM",
+      "timestamp": 1794542520908,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.76 USDT | 原因: TAKE_PROFIT | 净损益: +10.52 USDT (+25.67%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542520908_sdjf",
+      "time": "12:02:00 PM",
+      "timestamp": 1794542520908,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542520473_0asx",
+      "time": "12:02:00 PM",
+      "timestamp": 1794542520473,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542520445_ouvv",
+      "time": "12:02:00 PM",
+      "timestamp": 1794542520445,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.76 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542520284_ohvv",
+      "time": "12:02:00 PM",
+      "timestamp": 1794542520284,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.66 | 可用保证金: $216.92 | 实时净值: $298.32 | 浮动盈亏: $-0.34 USDT"
+    },
+    {
+      "id": "log_1794542500251_l6yi",
+      "time": "12:01:40 PM",
+      "timestamp": 1794542500251,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "💓 [系统心跳存活自检 OK] 模式: LIVE实盘 | 监控 5 个合约 (5m/15m/30m) | 盘面: [BTC: 🔴空头主跌 ($68,766.79) | ETH: 🔴空头主跌 ($1,931.64) | XAU: 🔴空头主跌 ($3,669.21) | NVDA: 🔴空头主跌 ($154.44) | CL: 🔴空头主跌 ($81.62)] | 活跃持仓: 0 笔 | 净值: $298.45"
+    },
+    {
+      "id": "log_1794542490198_fv5k",
+      "time": "12:01:30 PM",
+      "timestamp": 1794542490198,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.61 USDT | 原因: TAKE_PROFIT | 净损益: +10.74 USDT (+26.18%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542490098_4yog",
+      "time": "12:01:30 PM",
+      "timestamp": 1794542490098,
+      "level": "error",
+      "category": "API",
+      "message": "❌ [币安实盘同步失败] [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API. (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)"
+    },
+    {
+      "id": "log_1794542490039_grhs",
+      "time": "12:01:30 PM",
+      "timestamp": 1794542490039,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.61 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542489801_f42o",
+      "time": "12:01:29 PM",
+      "timestamp": 1794542489801,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 150.66 USDT | 原因: STOP_LOSS | 净损益: -10.03 USDT (-24.78%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542489365_xvpb",
+      "time": "12:01:29 PM",
+      "timestamp": 1794542489365,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 150.66 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542481255_y8ml",
+      "time": "12:01:21 PM",
+      "timestamp": 1794542481255,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542480755_g5x7",
+      "time": "12:01:20 PM",
+      "timestamp": 1794542480755,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.75 USDT | 原因: TAKE_PROFIT | 净损益: +10.54 USDT (+25.70%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542480755_g46j",
+      "time": "12:01:20 PM",
+      "timestamp": 1794542480755,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542480395_yei6",
+      "time": "12:01:20 PM",
+      "timestamp": 1794542480395,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542480151_pmrv",
+      "time": "12:01:20 PM",
+      "timestamp": 1794542480151,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.75 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542479889_17y1",
+      "time": "12:01:19 PM",
+      "timestamp": 1794542479889,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 150.91 USDT | 原因: STOP_LOSS | 净损益: -9.85 USDT (-24.32%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542479888_fs8c",
+      "time": "12:01:19 PM",
+      "timestamp": 1794542479888,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542479438_wk7k",
+      "time": "12:01:19 PM",
+      "timestamp": 1794542479438,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 150.91 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542470846_i0n1",
+      "time": "12:01:10 PM",
+      "timestamp": 1794542470847,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542470488_uvnr",
+      "time": "12:01:10 PM",
+      "timestamp": 1794542470488,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.84 USDT | 原因: TAKE_PROFIT | 净损益: +10.41 USDT (+25.39%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542470488_rled",
+      "time": "12:01:10 PM",
+      "timestamp": 1794542470488,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542470385_zudo",
+      "time": "12:01:10 PM",
+      "timestamp": 1794542470385,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542470049_18ma",
+      "time": "12:01:10 PM",
+      "timestamp": 1794542470049,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.84 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542469820_sghn",
+      "time": "12:01:09 PM",
+      "timestamp": 1794542469820,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.07 USDT | 原因: STOP_LOSS | 净损益: -9.73 USDT (-24.03%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542469819_pmlq",
+      "time": "12:01:09 PM",
+      "timestamp": 1794542469819,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542469360_qh1t",
+      "time": "12:01:09 PM",
+      "timestamp": 1794542469360,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.07 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542461385_54qf",
+      "time": "12:01:01 PM",
+      "timestamp": 1794542461385,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542460878_e9dp",
+      "time": "12:01:00 PM",
+      "timestamp": 1794542460878,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.91 USDT | 原因: TAKE_PROFIT | 净损益: +10.31 USDT (+25.15%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542460878_fei1",
+      "time": "12:01:00 PM",
+      "timestamp": 1794542460878,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542460469_h6a0",
+      "time": "12:01:00 PM",
+      "timestamp": 1794542460469,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542460299_7l3m",
+      "time": "12:01:00 PM",
+      "timestamp": 1794542460299,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.91 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542460279_p3yd",
+      "time": "12:01:00 PM",
+      "timestamp": 1794542460279,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.66 | 可用保证金: $217.02 | 实时净值: $298.43 | 浮动盈亏: $-0.24 USDT"
+    },
+    {
+      "id": "log_1794542440366_gfen",
+      "time": "12:00:40 PM",
+      "timestamp": 1794542440366,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "💓 [系统心跳存活自检 OK] 模式: LIVE实盘 | 监控 5 个合约 (5m/15m/30m) | 盘面: [BTC: 🔴空头主跌 ($68,880.4) | ETH: 🔴空头主跌 ($1,933.07) | XAU: 🔴空头主跌 ($3,675.49) | NVDA: 🔴空头主跌 ($154.61) | CL: 🔴空头主跌 ($81.71)] | 活跃持仓: 0 笔 | 净值: $298.41"
+    },
+    {
+      "id": "log_1794542430160_1gxx",
+      "time": "12:00:30 PM",
+      "timestamp": 1794542430160,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.75 USDT | 原因: TAKE_PROFIT | 净损益: +10.54 USDT (+25.70%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542430079_6ef2",
+      "time": "12:00:30 PM",
+      "timestamp": 1794542430079,
+      "level": "error",
+      "category": "API",
+      "message": "❌ [币安实盘同步失败] [-1003] Too many requests; current limit of IP(43.156.72.77) is 2400 requests per minute. Please use the websocket for live updates to avoid polling the API. (请检查 API Key 权限是否开启合约交易/服务器IP白名单/服务器地区支持)"
+    },
+    {
+      "id": "log_1794542430000_oeb4",
+      "time": "12:00:30 PM",
+      "timestamp": 1794542430000,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.75 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542429769_vmuv",
+      "time": "12:00:29 PM",
+      "timestamp": 1794542429769,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 150.91 USDT | 原因: STOP_LOSS | 净损益: -9.85 USDT (-24.32%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542429337_m8eh",
+      "time": "12:00:29 PM",
+      "timestamp": 1794542429337,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 150.91 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542420918_fvo8",
+      "time": "12:00:20 PM",
+      "timestamp": 1794542420918,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542420529_mkut",
+      "time": "12:00:20 PM",
+      "timestamp": 1794542420529,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 79.89 USDT | 原因: TAKE_PROFIT | 净损益: +10.34 USDT (+25.22%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542420529_oinw",
+      "time": "12:00:20 PM",
+      "timestamp": 1794542420529,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542420358_121f",
+      "time": "12:00:20 PM",
+      "timestamp": 1794542420358,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542420084_r90f",
+      "time": "12:00:20 PM",
+      "timestamp": 1794542420084,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 79.89 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542419828_rdwp",
+      "time": "12:00:19 PM",
+      "timestamp": 1794542419828,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.18 USDT | 原因: STOP_LOSS | 净损益: -9.65 USDT (-23.83%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542419828_kidl",
+      "time": "12:00:19 PM",
+      "timestamp": 1794542419828,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542419393_ytao",
+      "time": "12:00:19 PM",
+      "timestamp": 1794542419393,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.18 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542411420_e6f1",
+      "time": "12:00:11 PM",
+      "timestamp": 1794542411420,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542411061_79nj",
+      "time": "12:00:11 PM",
+      "timestamp": 1794542411061,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT LIVE] 实盘平仓: SHORT (币安已建仓位) @ 80.01 USDT | 原因: TAKE_PROFIT | 净损益: +10.17 USDT (+24.81%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542411061_ruwq",
+      "time": "12:00:11 PM",
+      "timestamp": 1794542411061,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542410482_poyt",
+      "time": "12:00:10 PM",
+      "timestamp": 1794542410482,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT LIVE] 触发平仓条件: TAKE_PROFIT @ 80.01 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542410376_zswi",
+      "time": "12:00:10 PM",
+      "timestamp": 1794542410376,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542410181_3909",
+      "time": "12:00:10 PM",
+      "timestamp": 1794542410181,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.38 USDT | 原因: STOP_LOSS | 净损益: -9.50 USDT (-23.46%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542410181_j8e6",
+      "time": "12:00:10 PM",
+      "timestamp": 1794542410181,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542409727_8a4r",
+      "time": "12:00:09 PM",
+      "timestamp": 1794542409727,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.38 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542404505_07b4",
+      "time": "12:00:04 PM",
+      "timestamp": 1794542404505,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542402717_k3ub",
+      "time": "12:00:02 PM",
+      "timestamp": 1794542402717,
+      "level": "info",
+      "category": "API",
+      "message": "🛡️ [实盘持仓补挂交易所止损] 为 CLUSDT (SHORT) 自动补挂 STOP_MARKET @ $88.55 (#2000001667273737)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542400682_dvos",
+      "time": "12:00:00 PM",
+      "timestamp": 1794542400682,
+      "level": "success",
+      "category": "ORDER",
+      "message": "✔ [CLUSDT 15m] 实盘平仓: SHORT (跨品种套利对冲 (NVDA / CL)) @ 80.25 USDT | 原因: TAKE_PROFIT | 净损益: +9.83 USDT (+23.98%)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542400682_xogc",
+      "time": "12:00:00 PM",
+      "timestamp": 1794542400682,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "🧠 [多维时空自学习 Update #2] 形态【跨品种统计套利 (Cross-Symbol Arb)】在 [15m / ASIA] 结算: 权重 1.00x -> 1.12x | 最佳周期: 15m (胜率 100%) | 黄金时段: 亚盘低波震荡 (胜率 100%) | 信念仓位: 1.12x"
+    },
+    {
+      "id": "log_1794542400681_rbmt",
+      "time": "12:00:00 PM",
+      "timestamp": 1794542400681,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542400438_zyjq",
+      "time": "12:00:00 PM",
+      "timestamp": 1794542400438,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542400111_zqse",
+      "time": "12:00:00 PM",
+      "timestamp": 1794542400111,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🎯 [CLUSDT 15m] 触发平仓条件: TAKE_PROFIT @ 80.25 USDT",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542399939_c7tt",
+      "time": "11:59:59 AM",
+      "timestamp": 1794542399939,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🚀 [CLUSDT 15m] 移动追踪已激活 (顺势涨跌 6.12% / 浮盈 $0.0 USDT)！动态止损锁定至成本保本价 $87.11，杜绝倒亏！",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542399851_b1mp",
+      "time": "11:59:59 AM",
+      "timestamp": 1794542399851,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "✔ [NVDAUSDT LIVE] 实盘平仓: LONG (币安已建仓位) @ 151.85 USDT | 原因: STOP_LOSS | 净损益: -9.15 USDT (-22.60%)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542399851_ijw4",
+      "time": "11:59:59 AM",
+      "timestamp": 1794542399851,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (14 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542399414_vg0h",
+      "time": "11:59:59 AM",
+      "timestamp": 1794542399414,
+      "level": "warn",
+      "category": "ORDER",
+      "message": "🎯 [NVDAUSDT LIVE] 触发平仓条件: STOP_LOSS @ 151.85 USDT",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542391208_32vj",
+      "time": "11:59:51 AM",
+      "timestamp": 1794542391208,
+      "level": "success",
+      "category": "ORDER",
+      "message": "🔀 [跨品种统计套利自动开仓] NVDA / CL (Z=-3.13, 半衰期 2bar) -> 做多弱势【NVDAUSDT】+ 做空强势【CLUSDT】，均已直挂止损与目标止盈！",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542390766_xhga",
+      "time": "11:59:50 AM",
+      "timestamp": 1794542390766,
+      "level": "info",
+      "category": "API",
+      "message": "ℹ️ [CLUSDT] 交易所已有同向止损/止盈单挂单，确认受保护 (STOP_MARKET @ $83.37)",
+      "symbol": "CLUSDT"
+    },
+    {
+      "id": "log_1794542390623_xttp",
+      "time": "11:59:50 AM",
+      "timestamp": 1794542390623,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (13 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542390429_tqu5",
+      "time": "11:59:50 AM",
+      "timestamp": 1794542390429,
+      "level": "info",
+      "category": "API",
+      "message": "🎯 [实盘持仓补挂交易所止盈] 为 NVDAUSDT (LONG) 自动补挂 TAKE_PROFIT_MARKET @ $169.56 (#2000001667270929)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542390346_t71s",
+      "time": "11:59:50 AM",
+      "timestamp": 1794542390346,
+      "level": "info",
+      "category": "API",
+      "message": "ℹ️ [NVDAUSDT] 交易所已有同向止损/止盈单挂单，确认受保护 (TAKE_PROFIT_MARKET @ $157.74)",
+      "symbol": "NVDAUSDT"
+    },
+    {
+      "id": "log_1794542387949_if76",
+      "time": "11:59:47 AM",
+      "timestamp": 1794542387949,
+      "level": "success",
+      "category": "SYSTEM",
+      "message": "▶ 启动全自动监控与胜率自优服务 | 监控币种: BTCUSDT, ETHUSDT, XAUUSDT, NVDAUSDT, CLUSDT | 监控周期: 5m, 15m, 30m | 模式: 🟢 币安实盘 API 下单"
+    },
+    {
+      "id": "log_1794542190606_47i9",
+      "time": "11:56:30 AM",
+      "timestamp": 1794542190607,
+      "level": "info",
+      "category": "API",
+      "message": "📜 已从币安合约实时同步 32 笔真实实盘成交与资金流水历史 (13 个历史净值节点)"
+    },
+    {
+      "id": "log_1794542190417_l8r1",
+      "time": "11:56:30 AM",
+      "timestamp": 1794542190417,
+      "level": "success",
+      "category": "API",
+      "message": "✅ [币安实盘账户已连接] 持仓模式: 单向持仓 (One-Way) | 钱包余额: $298.74 | 可用保证金: $298.74 | 实时净值: $298.74 | 浮动盈亏: +$0.00 USDT"
+    },
+    {
+      "id": "log_1794542189964_21qa",
+      "time": "11:56:29 AM",
+      "timestamp": 1794542189964,
+      "level": "info",
+      "category": "SYSTEM",
+      "message": "多币种 5m/15m/30m 动态形态量化引擎就绪 (监控: BTCUSDT, ETHUSDT, XAUUSDT, NVDAUSDT, CLUSDT) | 🧠 自学习强化引擎: 激活 (第 #1 代) | 模式: 🟢 币安实盘 API 模式 (正在连接交易所同步真实净值与持仓)"
+    }
+  ]
+}
