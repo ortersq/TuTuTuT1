@@ -17,6 +17,7 @@ import {
   AlertCircle,
   Layers,
   Lock,
+  KeyRound,
 } from 'lucide-react';
 import { LOCKED_TARGET_SYMBOLS } from '../utils/riskAndExecution';
 
@@ -45,6 +46,11 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   const [apiSecret, setApiSecret] = useState<string>('');
   const [isSavingKeys, setIsSavingKeys] = useState<boolean>(false);
   const [keySuccessMsg, setKeySuccessMsg] = useState<string | null>(null);
+
+  // Admin console password change state
+  const [newAdminPassword, setNewAdminPassword] = useState<string>('');
+  const [isSavingPassword, setIsSavingPassword] = useState<boolean>(false);
+  const [passwordMsg, setPasswordMsg] = useState<{ success: boolean; text: string } | null>(null);
 
   // Symbol management strictly locked to core 5 contracts
 
@@ -152,6 +158,39 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
       // ignore
     } finally {
       setIsSavingKeys(false);
+    }
+  };
+
+  const handleChangeAdminPassword = async (e: React.FormEvent) => {
+    e.preventDefault();
+    const clean = newAdminPassword.trim();
+    if (!clean || clean.length < 4) {
+      setPasswordMsg({ success: false, text: '密码长度至少需要 4 位字符' });
+      return;
+    }
+    setIsSavingPassword(true);
+    setPasswordMsg(null);
+    const token = localStorage.getItem('quant_auth_token');
+    try {
+      const res = await fetch('/api/auth/change-password', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ newPassword: clean }),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (res.ok && data?.success) {
+        setPasswordMsg({ success: true, text: '✓ 新密码已同步写入服务器 .env，实时生效无需重启！' });
+        setNewAdminPassword('');
+      } else {
+        setPasswordMsg({ success: false, text: data?.message || '更新密码失败' });
+      }
+    } catch {
+      setPasswordMsg({ success: false, text: '网络异常，未能更新密码' });
+    } finally {
+      setIsSavingPassword(false);
     }
   };
 
@@ -794,6 +833,68 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
                 清除 Key (切换至模拟盘)
               </button>
             )}
+          </div>
+        </form>
+      </div>
+
+      {/* 3.1 控制台登录密码设置 (支持 Web 界面修改与 .env 双向同步，即改即生效) */}
+      <div className="bg-[#111726] border border-slate-800 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-amber-500/10 border border-amber-500/30 flex items-center justify-center text-amber-400">
+              <KeyRound className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100 flex items-center gap-2">
+                <span>控制台访问密码设置 (Web端 &amp; .env 自动同步)</span>
+              </h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                支持在此处直接修改或在服务器 <code>.env</code> 中配置 <code>ADMIN_PASSWORD="您的密码"</code>，保存后热重载即时生效，无需重启 PM2 服务。
+              </p>
+            </div>
+          </div>
+          <span className="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono">
+            动态热重载已激活
+          </span>
+        </div>
+
+        <form onSubmit={handleChangeAdminPassword} className="space-y-4">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-300">设置新管理员密码:</label>
+            <div className="flex gap-3">
+              <input
+                type="text"
+                value={newAdminPassword}
+                onChange={(e) => setNewAdminPassword(e.target.value)}
+                placeholder="请输入新访问密码 (至少 4 位字符，支持字母/数字/特殊字符)"
+                className="flex-1 px-4 py-2.5 bg-[#0b0e14] border border-slate-800 rounded-xl text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-amber-400 font-mono"
+              />
+              <button
+                type="submit"
+                disabled={isSavingPassword || newAdminPassword.trim().length < 4}
+                className="px-5 py-2.5 bg-amber-400 hover:bg-amber-300 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-sm shrink-0"
+              >
+                {isSavingPassword ? '保存中...' : '保存新密码至 .env'}
+              </button>
+            </div>
+          </div>
+
+          {passwordMsg && (
+            <div
+              className={`p-3 rounded-xl text-xs font-medium border ${
+                passwordMsg.success
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+              }`}
+            >
+              {passwordMsg.text}
+            </div>
+          )}
+
+          <div className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800/80 text-[11px] text-slate-400 space-y-1 leading-relaxed">
+            <div className="font-semibold text-slate-300">💡 服务器手动配置指南:</div>
+            <div>• 若在终端中编辑服务器文件，请使用标准格式：<code className="text-amber-400 font-mono">ADMIN_PASSWORD="您设置的密码"</code>（推荐带英文双引号）。</div>
+            <div>• 系统采用动态读取机制，修改并保存 <code className="text-slate-300 font-mono">.env</code> 后无需执行 <code>pm2 restart</code>，下一次登录会自动采用最新密码。</div>
           </div>
         </form>
       </div>

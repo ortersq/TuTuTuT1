@@ -167,7 +167,7 @@ echo -e "    4. ${MAGENTA}智能仓位管理${NC}: 动态保证金核算与最�
 echo -e "\n  • 常用管理命令:"
 echo -e "    - 查看机器人实时日志: ${YELLOW}pm2 logs ${APP_NAME}${NC}"
 echo -e "    - 查看运行状态:       ${YELLOW}pm2 status${NC}"
-echo -e "    - 重启量化服务:       ${YELLOW}pm2 restart ${APP_NAME}${NC}"
+echo -e "    - 重启量化服务:       ${YELLOW}pm2 restart ${APP_NAME} --update-env${NC}"
 echo -e "    - 停止量化服务:       ${YELLOW}pm2 stop ${APP_NAME}${NC}"
 echo -e "\n${YELLOW}⚠️ 腾讯云/云服务商安全组提示:${NC}"
 echo -e "  请确保在云厂商后台控制台【安全组】中开放入方向 ${GREEN}TCP ${PORT}${NC} 端口。"

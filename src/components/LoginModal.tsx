@@ -92,10 +92,11 @@ export const LoginModal: React.FC<LoginModalProps> = ({ onLoginSuccess }) => {
           </button>
         </form>
 
-        <div className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800/80 text-[11px] text-slate-400 space-y-1">
+        <div className="p-3 bg-[#0b0e14] rounded-xl border border-slate-800/80 text-[11px] text-slate-400 space-y-1 leading-relaxed">
           <div className="font-semibold text-slate-300">💡 提示:</div>
           <div>• 初始默认密码为: <code className="text-amber-400 font-mono">admin123</code></div>
-          <div>• 如需自定义密码，可在服务器 <code className="text-slate-300 font-mono">.env</code> 中配置 <code className="text-emerald-400 font-mono">ADMIN_PASSWORD=您的新密码</code>。</div>
+          <div>• 自定义密码可在服务器 <code className="text-slate-300 font-mono">.env</code> 中配置 <code className="text-emerald-400 font-mono">ADMIN_PASSWORD="您的新密码"</code>。</div>
+          <div>• 现已支持 <strong>.env 动态即时重载</strong>（在文件修改保存后直接输入即可生效，无需重启服务）。</div>
         </div>
       </div>
     </div>

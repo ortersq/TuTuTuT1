@@ -3,32 +3,42 @@ import http from 'http';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import fs from 'fs';
+import dotenv from 'dotenv';
 import { WebSocketServer, WebSocket } from 'ws';
 import { botEngine } from './src/server/botEngine';
 import { fetchBinanceKlines } from './src/utils/binanceApi';
 import { LOCKED_TARGET_SYMBOLS, normalizeLockedSymbol } from './src/utils/riskAndExecution';
+import {
+  getAdminPassword,
+  verifyAdminPassword,
+  setAdminPassword,
+} from './src/utils/authConfig';
+
+dotenv.config();
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT ? parseInt(process.env.PORT, 10) : 3000;
-const ADMIN_PASSWORD = process.env.ADMIN_PASSWORD || 'admin123';
 
 // Session tokens store in memory
 const activeTokens = new Set<string>();
 
 app.use(express.json());
 
-// Public Auth API: Login
+// Public Auth API: Login (dynamically checks .env on every request so new passwords take effect immediately)
 app.post('/api/auth/login', (req, res) => {
   const { password } = req.body || {};
-  if (password === ADMIN_PASSWORD) {
+  if (verifyAdminPassword(password)) {
     const token = `quant_auth_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
     activeTokens.add(token);
     return res.json({ success: true, token, message: '登录成功' });
   }
-  return res.status(401).json({ success: false, message: '密码错误，默认密码为 admin123' });
+  return res.status(401).json({
+    success: false,
+    message: '密码错误。如已在 .env 中设置 ADMIN_PASSWORD，请核对输入或检查字符格式 (默认: admin123)',
+  });
 });
 
 // Public Auth API: Verify token
@@ -47,6 +57,21 @@ app.post('/api/auth/logout', (req, res) => {
   const token = authHeader.replace('Bearer ', '').trim();
   if (token) activeTokens.delete(token);
   return res.json({ success: true });
+});
+
+// Protected Auth API: Change admin password (persists directly into .env and updates runtime)
+app.post('/api/auth/change-password', (req, res) => {
+  const authHeader = req.headers.authorization || '';
+  const token = authHeader.replace('Bearer ', '').trim();
+  if (!token || !activeTokens.has(token)) {
+    return res.status(401).json({ error: 'UNAUTHORIZED', message: '请先登录量化控制台' });
+  }
+  const { newPassword } = req.body || {};
+  const result = setAdminPassword(newPassword);
+  if (result.success) {
+    return res.json({ success: true, message: result.message });
+  }
+  return res.status(400).json({ success: false, message: result.message });
 });
 
 // Auth Middleware for protected bot endpoints
