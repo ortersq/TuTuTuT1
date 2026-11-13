@@ -1,6 +1,20 @@
 @echo off
 setlocal enabledelayedexpansion
 chcp 65001 >nul
+title 一键 Git 提交推送
+
+REM ================= 报告相关变量 =================
+set "REPORT=git-push-report.txt"
+set "START=%date% %time%"
+set "STATUS=未知"
+set "STEP_ADD=未执行"
+set "STEP_COMMIT=未执行"
+set "STEP_PULL=未执行"
+set "STEP_PUSH=未执行"
+set "BRANCH=未知"
+set "MSG="
+set "ERRMSG="
+set "COMMIT_HASH="
 
 echo ==========================================
 echo        一键 Git 提交推送脚本
@@ -10,103 +24,148 @@ echo.
 REM ========== 1. 检查是否在 Git 仓库中 ==========
 git rev-parse --is-inside-work-tree >nul 2>&1
 if errorlevel 1 (
-    echo [错误] 当前目录不是 Git 仓库。
-    echo        请把本脚本放到仓库根目录，或先执行 git init。
-    goto :fail
+    set "STATUS=失败"
+    set "ERRMSG=当前目录不是 Git 仓库"
+    set "STEP_ADD=跳过"
+    goto :report
 )
+set "STEP_ADD=仓库检查通过"
 
-REM ========== 2. 检查是否有提交信息参数 ==========
+REM ========== 2. 获取提交信息 ==========
 set "MSG=%~1"
 if "%MSG%"=="" (
-    set /p "MSG=请输入提交说明（直接回车用默认 "update"）: "
+    set /p "MSG=请输入提交说明（直接回车用默认 update）: "
     if "!MSG!"=="" set "MSG=update"
 )
 
-REM ========== 3. 检查暂存区是否有改动 ==========
+REM ========== 3. 暂存改动 ==========
+echo.
+echo [执行] git add -A
 git add -A
 if errorlevel 1 (
-    echo [错误] git add 执行失败，请检查文件权限或仓库状态。
-    goto :fail
+    set "STATUS=失败"
+    set "ERRMSG=git add 执行失败"
+    goto :report
 )
+set "STEP_ADD=成功"
 
+REM ========== 4. 判断是否有改动 ==========
 git diff --cached --quiet
 if not errorlevel 1 (
-    echo [提示] 没有需要提交的改动，跳过 commit。
-    goto :push
+    set "STEP_COMMIT=无改动，跳过"
+    goto :check_remote
 )
 
-REM ========== 4. 提交 ==========
-echo.
 echo [执行] git commit -m "%MSG%"
-git commit -m "%MSG%"
+git commit -m "%MSG%" >temp_commit.log 2>&1
 if errorlevel 1 (
-    echo [错误] 提交失败。常见原因：
-    echo        - 未配置 user.name / user.email
-    echo          可执行：git config --global user.name "你的名字"
-    echo                  git config --global user.email "你的邮箱"
-    goto :fail
+    set "STEP_COMMIT=失败"
+    set "STATUS=失败"
+    set "ERRMSG=git commit 失败（可能未配置 user.name/user.email）"
+    type temp_commit.log
+    del temp_commit.log >nul 2>&1
+    goto :report
 )
+for /f "tokens=1" %%h in ('git rev-parse --short HEAD') do set "COMMIT_HASH=%%h"
+set "STEP_COMMIT=成功 (commit !COMMIT_HASH!)"
+del temp_commit.log >nul 2>&1
 
-:push
-REM ========== 5. 检查远程仓库是否配置 ==========
+:check_remote
+REM ========== 5. 检查远程仓库 ==========
 git remote get-url origin >nul 2>&1
 if errorlevel 1 (
-    echo [错误] 未配置远程仓库 origin。
-    echo        请执行：git remote add origin 仓库地址
-    goto :fail
+    set "STATUS=失败"
+    set "ERRMSG=未配置远程仓库 origin"
+    goto :report
 )
 
 REM ========== 6. 获取当前分支 ==========
 for /f "delims=" %%b in ('git rev-parse --abbrev-ref HEAD') do set "BRANCH=%%b"
 if "%BRANCH%"=="HEAD" (
-    echo [错误] 当前处于游离 HEAD 状态，无法确定推送分支。
-    goto :fail
+    set "STATUS=失败"
+    set "ERRMSG=当前处于游离 HEAD 状态，无法推送"
+    goto :report
 )
 echo.
 echo [信息] 当前分支：%BRANCH%
 
-REM ========== 7. 先拉取远程更新，避免被拒绝 ==========
+REM ========== 7. 拉取远程更新 ==========
 echo [执行] git pull --rebase origin %BRANCH%
-git pull --rebase origin %BRANCH%
+git pull --rebase origin %BRANCH% >temp_pull.log 2>&1
 if errorlevel 1 (
-    echo.
-    echo [警告] 拉取失败或存在冲突。可能原因：
-    echo        - 远程有新提交且与本地冲突
-    echo        - 网络 / 认证问题
-    echo        如果处于 rebase 冲突中，请手动解决后执行：
-    echo          git rebase --continue
-    echo        若要放弃本次 rebase：
-    echo          git rebase --abort
-    goto :fail
+    set "STEP_PULL=失败"
+    set "STATUS=失败"
+    set "ERRMSG=git pull --rebase 失败或存在冲突"
+    echo ---- pull 输出 ----
+    type temp_pull.log
+    echo -------------------
+    del temp_pull.log >nul 2>&1
+    goto :report
 )
+set "STEP_PULL=成功"
+del temp_pull.log >nul 2>&1
 
 REM ========== 8. 推送 ==========
-echo.
 echo [执行] git push origin %BRANCH%
-git push origin %BRANCH%
+git push origin %BRANCH% >temp_push.log 2>&1
 if errorlevel 1 (
-    echo.
-    echo [错误] 推送失败。常见原因：
-    echo        - 认证失败：GitHub 已不支持密码，需用 Personal Access Token 或 SSH
-    echo        - 无推送权限
-    echo        - 远程分支有更新（可重新运行本脚本，会先 pull）
-    goto :fail
+    set "STEP_PUSH=失败"
+    set "STATUS=失败"
+    set "ERRMSG=git push 失败（认证/权限/远程更新等）"
+    echo ---- push 输出 ----
+    type temp_push.log
+    echo -------------------
+    del temp_push.log >nul 2>&1
+    goto :report
 )
+set "STEP_PUSH=成功"
+set "STATUS=成功"
+del temp_push.log >nul 2>&1
+
+:report
+REM ================= 输出并保存报告 =================
+set "END=%date% %time%"
 
 echo.
 echo ==========================================
-echo    ✅ 全部完成，已推送到 origin/%BRANCH%
+echo              运行报告
 echo ==========================================
-goto :end
+echo 开始时间 : %START%
+echo 结束时间 : %END%
+echo 提交说明 : %MSG%
+echo 当前分支 : %BRANCH%
+echo ------------------------------------------
+echo 仓库检查 : %STEP_ADD%
+echo 提交     : %STEP_COMMIT%
+echo 拉取     : %STEP_PULL%
+echo 推送     : %STEP_PUSH%
+echo ------------------------------------------
+echo 最终状态 : %STATUS%
+if not "%ERRMSG%"=="" echo 错误信息 : %ERRMSG%
+echo ==========================================
 
-:fail
+(
+echo ========== Git 推送运行报告 ==========
+echo 开始时间 : %START%
+echo 结束时间 : %END%
+echo 提交说明 : %MSG%
+echo 当前分支 : %BRANCH%
+echo --------------------------------------
+echo 仓库检查 : %STEP_ADD%
+echo 提交     : %STEP_COMMIT%
+echo 拉取     : %STEP_PULL%
+echo 推送     : %STEP_PUSH%
+echo --------------------------------------
+echo 最终状态 : %STATUS%
+if not "%ERRMSG%"=="" echo 错误信息 : %ERRMSG%
+echo ======================================
+) > "%REPORT%"
+
 echo.
-echo ==========================================
-echo    ❌ 操作中止，请根据上面的提示处理
-echo ==========================================
+echo 报告已保存到：%CD%\%REPORT%
+echo.
+echo 窗口不会自动关闭，看完请手动关闭。
+echo.
+pause
 endlocal
-exit /b 1
-
-:end
-endlocal
-exit /b 0
+exit /b
