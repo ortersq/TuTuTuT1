@@ -72,9 +72,29 @@ export type PositionSizeMode = 'EQUITY_PERCENT' | 'FIXED_AMOUNT' | 'RISK_PARITY_
 
 export interface NotificationConfig {
   enableEmergencyAlerts: boolean;
+  /** Master switch for the Telegram transport (emergency + trade alerts). */
+  telegramEnabled?: boolean;
   telegramBotToken?: string;
   telegramChatId?: string;
+  /** Push every open/close fill to Telegram. */
+  tradeAlertsEnabled?: boolean;
+  /** Push stop-loss / take-profit changes (breakeven, trailing ratchet, re-attach). */
+  protectionAlertsEnabled?: boolean;
   webhookUrl?: string;
+  lastAlertTimestamp?: number;
+}
+
+/** Secret-free view of the notification config, safe to expose to the browser. */
+export interface NotificationStatus {
+  telegramConfigured: boolean;
+  telegramEnabled: boolean;
+  tradeAlertsEnabled: boolean;
+  protectionAlertsEnabled: boolean;
+  emergencyAlertsEnabled: boolean;
+  /** Masked token, e.g. `1234••••abcd`. Never the raw secret. */
+  botTokenHint: string;
+  chatId: string;
+  webhookConfigured: boolean;
   lastAlertTimestamp?: number;
 }
 
@@ -106,6 +126,12 @@ export interface RiskManagementConfig {
 
   leverage: number;
   maxAllowedDrawdownPercent: number;
+
+  /**
+   * Minutes to wait before the same symbol may be re-opened after a close.
+   * Prevents "close → same signal re-fires on the next scan → re-open" churn.
+   */
+  symbolReentryCooldownMinutes?: number;
 }
 
 export interface Trade {

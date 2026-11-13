@@ -72,3 +72,72 @@ test('clearing only the log console keeps trades and learning untouched', () => 
   // Silent mode must leave a completely empty console.
   assert.equal(botEngine.getStatus().logs.length, 0);
 });
+
+test('telegram config is masked: the raw bot token never reaches the browser payload', () => {
+  const rawToken = '123456789:AAHabcdefghijklmnopqrstuvwxyz012345';
+  botEngine.setNotificationConfig({
+    telegramBotToken: rawToken,
+    telegramChatId: '-1001234567890',
+    telegramEnabled: true,
+    tradeAlertsEnabled: true,
+  });
+
+  const status = botEngine.getStatus();
+  assert.equal(status.notificationStatus.telegramConfigured, true);
+  assert.equal(status.notificationStatus.chatId, '-1001234567890');
+  assert.ok(status.notificationStatus.botTokenHint.includes('••••'));
+  // Neither the status field nor riskConfig may contain the secret.
+  assert.equal(JSON.stringify(status).includes('AAHabcdefghijklmnop'), false);
+  assert.equal(String(status.riskConfig.notification?.telegramBotToken || '').includes('AAHabcdefghij'), false);
+
+  // Re-submitting the masked hint must not overwrite the stored token.
+  botEngine.setNotificationConfig({ telegramBotToken: status.notificationStatus.botTokenHint });
+  assert.equal(botEngine.getStatus().notificationStatus.telegramConfigured, true);
+});
+
+test('telegram test without credentials fails fast with an actionable message', async () => {
+  botEngine.setNotificationConfig({ telegramBotToken: '', telegramChatId: '' });
+  const result = await botEngine.sendTelegramTest();
+  assert.equal(result.success, false);
+  assert.match(result.message, /请先填写/);
+});
+
+test('stop-loss / take-profit alert toggle is persisted in the public status', () => {
+  botEngine.setNotificationConfig({
+    telegramBotToken: '123456789:AAHabcdefghijklmnopqrstuvwxyz012345',
+    telegramChatId: '123456789',
+    protectionAlertsEnabled: false,
+  });
+  assert.equal(botEngine.getStatus().notificationStatus.protectionAlertsEnabled, false);
+
+  botEngine.setNotificationConfig({ protectionAlertsEnabled: true });
+  assert.equal(botEngine.getStatus().notificationStatus.protectionAlertsEnabled, true);
+
+  // Default is ON so existing installs keep receiving SL/TP changes without re-configuring.
+  botEngine.setNotificationConfig({ telegramBotToken: '', telegramChatId: '' });
+});
+
+test('protection-change message shows original → new level, and marks a fresh attach', () => {
+  const format = (botEngine as any).formatProtectionChange.bind(botEngine);
+  const pos = {
+    symbol: 'CLUSDT',
+    interval: '5m',
+    side: 'LONG',
+    entryPrice: 79.12,
+    stopLossPrice: 79.2,
+    takeProfitPrice: 81.73,
+    currentPrice: 79.35,
+    unrealizedPnl: 0.31,
+    unrealizedPnlPercent: 2.1,
+  };
+
+  const moved = format(pos, 77.93, 81.73, ['自动保本上移']);
+  assert.match(moved, /止损: \$77\.93 → <b>\$79\.20<\/b>/);
+  assert.match(moved, /止盈: \$81\.73（未变）/);
+  assert.match(moved, /原因: 自动保本上移/);
+  assert.match(moved, /浮盈 \+\$0\.31/);
+
+  const attached = format({ ...pos }, null, 81.73, ['交易所补挂止损']);
+  assert.match(attached, /止损: 未挂 → <b>\$79\.20<\/b>/);
+  assert.match(attached, /（新挂）/);
+});

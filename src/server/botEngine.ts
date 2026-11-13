@@ -25,6 +25,7 @@ import {
   LiveAccountSyncInfo,
   MarketCorrelationMetrics,
   MarketTickerSnapshot,
+  NotificationStatus,
   PatternLearningItem,
   PortfolioAllocationState,
   PortfolioBasketState,
@@ -221,6 +222,7 @@ export interface BotStatus {
   lastUpdateTime: number;
   lastMarketPreviewTime: number;
   riskConfig: RiskManagementConfig;
+  notificationStatus: NotificationStatus;
 }
 
 class TradingEngine {
@@ -255,6 +257,11 @@ class TradingEngine {
   /** Back-off after repeated failed close attempts so a rejected order cannot spam every cycle. */
   private closeRetryAfter: Map<string, number> = new Map();
   private closeFailureCount: Map<string, number> = new Map();
+  /** Per-symbol cool-down after a close: blocks the "same signal re-opens immediately" churn. */
+  private symbolCooldownUntil: Map<string, number> = new Map();
+  /** Last candle used to open a position, so one candle can only produce one entry. */
+  private lastEntryBarTime: Map<string, { interval: string; barTime: number }> = new Map();
+  private lastCooldownLogAt: Map<string, number> = new Map();
   /** Last time we attached exchange protection for `symbol:side` (prevents duplicate SL/TP storms). */
   private protectionPlacedAt: Map<string, number> = new Map();
   /**
@@ -293,6 +300,15 @@ class TradingEngine {
   private lastMarketPreviewTime: number = 0;
   private syncInFlight: Promise<LiveAccountSyncInfo | null> | null = null;
   private syncToken: number = 0;
+  /** Telegram send queue (1.1s spacing) so a multi-leg close cannot trigger a 429. */
+  private telegramQueue: string[] = [];
+  private telegramDraining: boolean = false;
+  /** Coalesced SL/TP change alerts (a trailing stop can move every scan). */
+  private protectionAlertPending: Map<
+    string,
+    { prevSl: number | null; prevTp: number | null; reasons: Set<string> }
+  > = new Map();
+  private protectionAlertTimer: NodeJS.Timeout | null = null;
   private lastLiveSamplePushTime: number = 0;
   private latestSymbolKlinesMap: Map<string, Kline[]> = new Map();
   private marketTickers: Map<string, MarketTickerSnapshot> = new Map();
@@ -332,6 +348,9 @@ class TradingEngine {
     autoBreakevenUsdt: 15,
     notification: {
       enableEmergencyAlerts: true,
+      telegramEnabled: process.env.TELEGRAM_ENABLED !== 'false',
+      tradeAlertsEnabled: process.env.TELEGRAM_TRADE_ALERTS !== 'false',
+      protectionAlertsEnabled: process.env.TELEGRAM_PROTECTION_ALERTS !== 'false',
       telegramBotToken: process.env.TELEGRAM_BOT_TOKEN?.trim() || '',
       telegramChatId: process.env.TELEGRAM_CHAT_ID?.trim() || '',
       webhookUrl: process.env.EMERGENCY_WEBHOOK_URL?.trim() || '',
@@ -345,6 +364,7 @@ class TradingEngine {
     riskPerTradePercent: 2.0,
     leverage: 5,
     maxAllowedDrawdownPercent: 20,
+    symbolReentryCooldownMinutes: 5,
   };
 
   private params: StrategyParams = DEFAULT_STRATEGY_PARAMS;
@@ -1279,6 +1299,9 @@ class TradingEngine {
    * inventing a result (the old code used `markPrice - entryPrice` and called it realised PnL).
    */
   private async handleExchangeSideClose(existing: ActivePosition): Promise<void> {
+    // Whatever the outcome, the symbol must not be re-entered immediately after it closed on
+    // the exchange (a stop-out usually happens while the entry signal is still "valid").
+    this.startSymbolCooldown(existing.symbol);
     // Position is flat: its leftover conditional orders are stale and could open a reverse
     // position later, so they must be removed.
     await this.cancelAllBinanceOrders(existing.symbol, true).catch(() => {});
@@ -1297,6 +1320,7 @@ class TradingEngine {
     this.closedTrades.push(resolved);
     this.closedTrades = this.closedTrades.slice(-200);
     this.updatePatternLearning(resolved);
+    this.notifyTradeClose(resolved, existing);
     this.addLog(
       resolved.netPnl >= 0 ? 'success' : 'warn',
       'ORDER',
@@ -1917,6 +1941,21 @@ class TradingEngine {
     }
   }
 
+  private getReentryCooldownMs(): number {
+    const envMins = Number(process.env.SYMBOL_REENTRY_COOLDOWN_MINUTES);
+    const mins =
+      Number.isFinite(envMins) && envMins >= 0
+        ? envMins
+        : this.riskConfig.symbolReentryCooldownMinutes ?? 5;
+    return Math.max(0, Math.min(1440, mins)) * 60_000;
+  }
+
+  /** Start the post-close cool-down for a symbol (0 disables it). */
+  private startSymbolCooldown(symbol: string): void {
+    const ms = this.getReentryCooldownMs();
+    if (ms > 0) this.symbolCooldownUntil.set(symbol, Date.now() + ms);
+  }
+
   private registerCloseFailure(symbol: string): void {
     const count = (this.closeFailureCount.get(symbol) ?? 0) + 1;
     this.closeFailureCount.set(symbol, count);
@@ -1969,6 +2008,8 @@ class TradingEngine {
       pos.currentPrice
     );
     if (!placed?.orderId) return;
+    const prevSl = pos.stopLossPrice;
+    const prevTp = pos.takeProfitPrice;
     const oldId = pos.stopLossOrderId;
     pos.stopLossPrice = desired;
     pos.stopLossOrderId = placed.orderId;
@@ -1982,6 +2023,7 @@ class TradingEngine {
       `📈 [移动止损已同步至交易所] ${pos.symbol} STOP_MARKET 上移至 $${desired.toFixed(2)} (#${placed.orderId})`,
       pos.symbol
     );
+    this.queueProtectionChange(pos, prevSl, prevTp, '移动止损上移');
   }
 
   /** Real quantity currently open on the exchange for a symbol/side, or null if unknown. */
@@ -2061,6 +2103,8 @@ class TradingEngine {
       // without this guard the engine would place a duplicate SL/TP on every 5s sync.
       if (now - (this.protectionPlacedAt.get(protKey) ?? 0) < 120_000) continue;
       let placedAny = false;
+      let attachedSl: number | null = null;
+      let attachedTp: number | null = null;
 
       if (!pos.stopLossOrderId) {
         if (!this.binanceRest.canAfford(6)) return;
@@ -2077,6 +2121,7 @@ class TradingEngine {
           );
           if (placed?.orderId) {
             placedAny = true;
+            attachedSl = safeSl;
             pos.stopLossPrice = safeSl;
             pos.stopLossOrderId = placed.orderId;
             this.addLog(
@@ -2104,6 +2149,7 @@ class TradingEngine {
           );
           if (placed?.orderId) {
             placedAny = true;
+            attachedTp = safeTp;
             pos.takeProfitPrice = safeTp;
             pos.takeProfitOrderId = placed.orderId;
             this.addLog(
@@ -2116,7 +2162,20 @@ class TradingEngine {
         }
       }
 
-      if (placedAny) this.protectionPlacedAt.set(protKey, Date.now());
+      if (placedAny) {
+        this.protectionPlacedAt.set(protKey, Date.now());
+        this.queueProtectionChange(
+          pos,
+          // null = "there was no order on the exchange", so the message reads 未挂 → 新挂.
+          attachedSl !== null ? null : pos.stopLossPrice,
+          attachedTp !== null ? null : pos.takeProfitPrice,
+          attachedSl !== null && attachedTp !== null
+            ? '交易所补挂止损+止盈'
+            : attachedSl !== null
+            ? '交易所补挂止损'
+            : '交易所补挂止盈'
+        );
+      }
     }
   }
 
@@ -2835,7 +2894,18 @@ class TradingEngine {
       systemMetrics: this.getServerSystemMetrics(),
       lastUpdateTime: this.lastUpdateTime,
       lastMarketPreviewTime: this.lastMarketPreviewTime,
-      riskConfig: this.riskConfig,
+      // Never leak the bot token / webhook secret to the browser.
+      riskConfig: {
+        ...this.riskConfig,
+        notification: this.riskConfig.notification
+          ? {
+              ...this.riskConfig.notification,
+              telegramBotToken: this.maskSecret(this.riskConfig.notification.telegramBotToken),
+              webhookUrl: this.maskSecret(this.riskConfig.notification.webhookUrl),
+            }
+          : undefined,
+      },
+      notificationStatus: this.getNotificationStatus(),
     };
   }
 
@@ -3031,6 +3101,9 @@ class TradingEngine {
       this.closedTrades = [];
       this.smartExecutionLogs = [];
       this.correlationHedgingLogs = [];
+      this.symbolCooldownUntil.clear();
+      this.lastEntryBarTime.clear();
+      this.lastCooldownLogAt.clear();
       this.basketPeakNetPnl = 0;
       this.equityHistory = [];
       // Cut-off: fills / income events older than now must never be re-imported.
@@ -3088,13 +3161,16 @@ class TradingEngine {
   public clearCooldowns(): void {
     this.basketCloseCooldownUntil = null;
     this.pendingOrderSymbols.clear();
+    this.symbolCooldownUntil.clear();
+    this.lastEntryBarTime.clear();
+    this.lastCooldownLogAt.clear();
     if (this.params.minPatternQuality > 75) {
       this.params = { ...this.params, minPatternQuality: 75 };
     }
     this.addLog(
       'success',
       'SYSTEM',
-      `🔧 [异常溯源一键修复] 已清除全平冷却期与挂单占位锁，信号质量标准门限已校准为 ${this.params.minPatternQuality} 分。`
+      `🔧 [异常溯源一键修复] 已清除全平冷却期、单币平仓冷却与挂单占位锁，信号质量标准门限已校准为 ${this.params.minPatternQuality} 分。`
     );
     this.notifyListeners(true);
   }
@@ -3222,6 +3298,399 @@ class TradingEngine {
     this.notifyListeners();
   }
 
+  // ==================================================================================
+  // Telegram 通知
+  // ==================================================================================
+
+  private maskSecret(secret?: string): string {
+    const s = String(secret ?? '');
+    if (!s) return '';
+    if (s.length <= 8) return '••••';
+    return `${s.slice(0, 4)}••••${s.slice(-4)}`;
+  }
+
+  /** Secret-free snapshot for the UI (the raw bot token must never leave the server). */
+  public getNotificationStatus(): NotificationStatus {
+    const n = this.riskConfig.notification;
+    const token = n?.telegramBotToken?.trim() || '';
+    const chatId = n?.telegramChatId?.trim() || '';
+    return {
+      telegramConfigured: Boolean(token && chatId),
+      telegramEnabled: n?.telegramEnabled !== false,
+      tradeAlertsEnabled: n?.tradeAlertsEnabled !== false,
+      protectionAlertsEnabled: n?.protectionAlertsEnabled !== false,
+      emergencyAlertsEnabled: n?.enableEmergencyAlerts !== false,
+      botTokenHint: this.maskSecret(token),
+      chatId,
+      webhookConfigured: Boolean(n?.webhookUrl),
+      lastAlertTimestamp: n?.lastAlertTimestamp,
+    };
+  }
+
+  private upsertEnvVars(vars: Record<string, string>): void {
+    // Never write .env from a unit test / CLI probe.
+    if (!this.persistenceEnabled) return;
+    try {
+      const envPath = path.resolve(process.cwd(), '.env');
+      let content = fs.existsSync(envPath) ? fs.readFileSync(envPath, 'utf8') : '';
+      for (const [key, value] of Object.entries(vars)) {
+        const re = new RegExp(`^${key}=.*$`, 'm');
+        content = re.test(content)
+          ? content.replace(re, `${key}=${value}`)
+          : `${content.trimEnd()}\n${key}=${value}\n`;
+      }
+      fs.writeFileSync(envPath, `${content.trim()}\n`, 'utf8');
+    } catch (err: any) {
+      this.addLog('warn', 'SYSTEM', `⚠️ 通知配置写入 .env 失败（重启后会丢失）: ${err?.message || err}`);
+    }
+  }
+
+  /**
+   * Save the Telegram configuration from the UI.
+   * An empty / masked token means "keep the existing one", so the browser never needs to
+   * handle the raw secret after the first save.
+   */
+  public setNotificationConfig(patch: {
+    telegramEnabled?: boolean;
+    telegramBotToken?: string;
+    telegramChatId?: string;
+    tradeAlertsEnabled?: boolean;
+    protectionAlertsEnabled?: boolean;
+    enableEmergencyAlerts?: boolean;
+    webhookUrl?: string;
+  }): { success: boolean; message: string; notification: NotificationStatus } {
+    const current = this.riskConfig.notification || { enableEmergencyAlerts: true };
+    const next = { ...current };
+    const warnings: string[] = [];
+
+    if (typeof patch.telegramEnabled === 'boolean') next.telegramEnabled = patch.telegramEnabled;
+    if (typeof patch.tradeAlertsEnabled === 'boolean') next.tradeAlertsEnabled = patch.tradeAlertsEnabled;
+    if (typeof patch.protectionAlertsEnabled === 'boolean') {
+      next.protectionAlertsEnabled = patch.protectionAlertsEnabled;
+    }
+    if (typeof patch.enableEmergencyAlerts === 'boolean') {
+      next.enableEmergencyAlerts = patch.enableEmergencyAlerts;
+    }
+
+    if (patch.telegramBotToken !== undefined) {
+      const token = String(patch.telegramBotToken).trim();
+      // Ignore the masked placeholder echoed back by the UI.
+      if (!token.includes('••••')) {
+        next.telegramBotToken = token;
+        if (token && !/^\d{5,}:[A-Za-z0-9_-]{20,}$/.test(token)) {
+          warnings.push('Token 格式不像 BotFather 生成的（应为 123456789:AAH... 形式），请再用「发送测试消息」验证');
+        }
+      }
+    }
+
+    if (patch.telegramChatId !== undefined) {
+      const chatId = String(patch.telegramChatId).trim();
+      next.telegramChatId = chatId;
+      if (chatId && !/^(-?\d+|@[A-Za-z0-9_]{4,})$/.test(chatId)) {
+        warnings.push('Chat ID 通常是一串数字（群组为负数 -100...）或 @频道名');
+      }
+    }
+
+    if (patch.webhookUrl !== undefined) {
+      const url = String(patch.webhookUrl).trim();
+      if (!url.includes('••••')) next.webhookUrl = url;
+    }
+
+    this.riskConfig = { ...this.riskConfig, notification: next };
+
+    this.upsertEnvVars({
+      TELEGRAM_BOT_TOKEN: next.telegramBotToken || '',
+      TELEGRAM_CHAT_ID: next.telegramChatId || '',
+      TELEGRAM_ENABLED: next.telegramEnabled === false ? 'false' : 'true',
+      TELEGRAM_TRADE_ALERTS: next.tradeAlertsEnabled === false ? 'false' : 'true',
+      TELEGRAM_PROTECTION_ALERTS: next.protectionAlertsEnabled === false ? 'false' : 'true',
+      EMERGENCY_WEBHOOK_URL: next.webhookUrl || '',
+    });
+
+    const configured = Boolean(next.telegramBotToken?.trim() && next.telegramChatId?.trim());
+    const message = configured
+      ? `✅ Telegram 通知已保存${next.telegramEnabled === false ? '（当前为关闭状态）' : ''}${
+          warnings.length ? `。注意：${warnings.join('；')}` : '，建议点一下「发送测试消息」验证'
+        }`
+      : '已保存，但 Bot Token 或 Chat ID 仍为空，暂时不会推送任何消息';
+
+    this.addLog(
+      configured ? 'success' : 'warn',
+      'SYSTEM',
+      configured
+        ? `📣 Telegram 通知配置已更新 | 开平仓推送: ${
+            next.tradeAlertsEnabled === false ? '关' : '开'
+          } | 止盈止损变动: ${next.protectionAlertsEnabled === false ? '关' : '开'} | 紧急预警: ${
+            next.enableEmergencyAlerts === false ? '关' : '开'
+          } | Chat: ${this.maskSecret(next.telegramChatId)}`
+        : '📣 Telegram 通知配置已保存但尚未填写完整（需要 Bot Token + Chat ID 两个都填）'
+    );
+    this.notifyListeners(true);
+    return { success: true, message, notification: this.getNotificationStatus() };
+  }
+
+  private static escapeHtml(value: unknown): string {
+    return String(value ?? '')
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;');
+  }
+
+  /** Raw Telegram call. Returns the parsed error so the UI can show an actionable hint. */
+  private async postTelegram(
+    text: string
+  ): Promise<{ ok: boolean; status: number; description?: string }> {
+    const n = this.riskConfig.notification;
+    const token = n?.telegramBotToken?.trim();
+    const chatId = n?.telegramChatId?.trim();
+    if (!token || !chatId) {
+      return { ok: false, status: 0, description: '未配置 Telegram Bot Token 或 Chat ID' };
+    }
+    try {
+      const res = await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_id: chatId,
+          text,
+          parse_mode: 'HTML',
+          disable_web_page_preview: true,
+        }),
+        signal: AbortSignal.timeout(12_000),
+      });
+      const data: any = await res.json().catch(() => ({}));
+      return {
+        ok: res.ok && data?.ok === true,
+        status: res.status,
+        description: data?.description,
+      };
+    } catch (err: any) {
+      return { ok: false, status: 0, description: err?.message || String(err) };
+    }
+  }
+
+  /** Human-readable explanation for the most common Telegram API failures. */
+  private describeTelegramError(result: { status: number; description?: string }): string {
+    const detail = String(result.description || '');
+    if (result.status === 401) {
+      return 'Token 无效（401 Unauthorized）：请回 @BotFather 用 /token 重新获取，或确认没有多余空格';
+    }
+    if (/chat not found/i.test(detail)) {
+      return 'Chat ID 不存在：请先给 Bot 发送 /start，或把 Bot 拉进群后再取一次 Chat ID';
+    }
+    if (result.status === 403) {
+      return 'Bot 被拉黑或没有发言权限（403）：请解除拉黑，群组里给 Bot 发消息权限';
+    }
+    if (result.status === 429) {
+      return '发送过于频繁（429）：Telegram 限流，等 30 秒再试（程序内部已做 1.1 秒队列间隔）';
+    }
+    if (result.status === 400) {
+      return `请求被拒（400）：${detail || '请检查 Chat ID 格式'}`;
+    }
+    if (result.status === 0) {
+      return `网络异常：${detail || '无法连接 api.telegram.org（服务器可能需要代理）'}`;
+    }
+    return `发送失败（HTTP ${result.status}）：${detail || '未知错误'}`;
+  }
+
+  /** Queue-based sender: protects against Telegram 429 when several legs close at once. */
+  private enqueueTelegram(text: string, kind: 'TRADE' | 'PROTECTION' | 'EMERGENCY' = 'TRADE'): void {
+    const n = this.riskConfig.notification;
+    if (!n || n.telegramEnabled === false) return;
+    if (!n.telegramBotToken?.trim() || !n.telegramChatId?.trim()) return;
+    if (kind === 'TRADE' && n.tradeAlertsEnabled === false) return;
+    if (kind === 'PROTECTION' && n.protectionAlertsEnabled === false) return;
+    if (this.telegramQueue.length >= 20) this.telegramQueue.shift(); // drop the oldest under a burst
+    this.telegramQueue.push(text);
+    void this.drainTelegramQueue();
+  }
+
+  private async drainTelegramQueue(): Promise<void> {
+    if (this.telegramDraining) return;
+    this.telegramDraining = true;
+    try {
+      while (this.telegramQueue.length > 0) {
+        const text = this.telegramQueue.shift() as string;
+        const result = await this.postTelegram(text);
+        if (!result.ok) {
+          this.addLog(
+            'warn',
+            'API',
+            `📣 Telegram 推送失败: ${this.describeTelegramError(result)}`
+          );
+          if (result.status === 0 || result.status === 401 || result.status === 403) {
+            // Credentials/network are broken: drop the rest instead of retrying every message.
+            this.telegramQueue = [];
+            break;
+          }
+          if (result.status === 429) break; // keep the queue, let the next event retry
+        }
+        await new Promise((r) => setTimeout(r, 1100));
+      }
+    } finally {
+      this.telegramDraining = false;
+    }
+  }
+
+  /** Send an immediate test message (bypasses the queue) and return a UI-friendly hint. */
+  public async sendTelegramTest(): Promise<{ success: boolean; message: string }> {
+    const n = this.riskConfig.notification;
+    if (!n?.telegramBotToken?.trim() || !n?.telegramChatId?.trim()) {
+      return { success: false, message: '请先填写并保存 Bot Token 与 Chat ID' };
+    }
+    const text = [
+      '✅ <b>Telegram 通知通道测试成功</b>',
+      '',
+      '币安量化控制台已可以向本会话推送：',
+      '• 开仓 / 平仓成交明细',
+      '• 风控熔断与同步异常预警',
+      '',
+      `⏰ ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`,
+    ].join('\n');
+    const result = await this.postTelegram(text);
+    if (result.ok) {
+      this.addLog('success', 'SYSTEM', '📣 Telegram 测试消息已发送，请到 Telegram 查看');
+      return { success: true, message: '测试消息已发送，请到 Telegram 查看（若没收到，检查是否被 Bot 隐私设置拦截）' };
+    }
+    const hint = this.describeTelegramError(result);
+    this.addLog('warn', 'SYSTEM', `📣 Telegram 测试失败: ${hint}`);
+    return { success: false, message: hint };
+  }
+
+  private notifyTradeOpen(pos: ActivePosition): void {
+    const notional = pos.quantity * pos.entryPrice;
+    const sideText = pos.side === 'LONG' ? '做多 LONG 📈' : '做空 SHORT 📉';
+    const lines = [
+      `📈 <b>开仓成交</b> <code>${TradingEngine.escapeHtml(pos.symbol)}</code>`,
+      `方向: ${sideText} | 周期 ${TradingEngine.escapeHtml(pos.interval)}`,
+      `成交价: <b>$${pos.entryPrice}</b>`,
+      `数量: ${pos.quantity} | 名义价值 ≈ $${notional.toFixed(2)}`,
+      `杠杆: ${pos.leverage}x | 保证金 ≈ $${pos.marginUsed.toFixed(2)}`,
+      pos.stopLossPrice
+        ? `止损: $${pos.stopLossPrice.toFixed(2)}${
+            pos.takeProfitPrice ? ` | 止盈: $${pos.takeProfitPrice.toFixed(2)}` : ''
+          }`
+        : '⚠️ 止损尚未挂上（下个同步周期会自动补挂）',
+      `🧠 形态: ${TradingEngine.escapeHtml(pos.patternName)}`,
+      `⏰ ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`,
+    ];
+    this.enqueueTelegram(lines.join('\n'));
+  }
+
+  private notifyTradeClose(record: BotTradeRecord, pos: ActivePosition): void {
+    const holdMs = Math.max(0, record.exitTime - record.entryTime);
+    const holdText =
+      holdMs >= 3_600_000
+        ? `${(holdMs / 3_600_000).toFixed(1)} 小时`
+        : `${Math.max(1, Math.round(holdMs / 60_000))} 分钟`;
+    const pnl = record.netPnl;
+    const lines = [
+      `📉 <b>平仓成交</b> <code>${TradingEngine.escapeHtml(record.symbol)}</code>`,
+      `方向: ${pos.side === 'LONG' ? '做多 LONG' : '做空 SHORT'} | 周期 ${TradingEngine.escapeHtml(
+        record.interval
+      )}`,
+      `开仓: $${record.entryPrice} → 平仓: $${record.exitPrice}`,
+      `数量: ${record.quantity}`,
+      `净盈亏: <b>${pnl >= 0 ? '+' : ''}$${pnl.toFixed(2)} USDT (${record.pnlPercent >= 0 ? '+' : ''}${record.pnlPercent.toFixed(
+        2
+      )}%)</b> ${pnl >= 0 ? '✅' : '⚠️'}`,
+      `原因: ${record.exitReason} | 持仓 ${holdText}`,
+      `💰 当前净值: $${this.equity.toFixed(2)}`,
+      `⏰ ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`,
+    ];
+    this.enqueueTelegram(lines.join('\n'));
+  }
+
+  /**
+   * Queue a stop-loss / take-profit change alert.
+   *
+   * A trailing stop can ratchet on every scan, so changes are coalesced into one message per
+   * 6-second window per symbol: the message always shows the ORIGINAL level → the latest level,
+   * which is what a human actually wants to see.
+   */
+  private queueProtectionChange(
+    pos: ActivePosition,
+    prevSl: number | null,
+    prevTp: number | null,
+    reason: string
+  ): void {
+    const n = this.riskConfig.notification;
+    if (!n || n.telegramEnabled === false || n.protectionAlertsEnabled === false) return;
+    if (!n.telegramBotToken?.trim() || !n.telegramChatId?.trim()) return;
+
+    const existing = this.protectionAlertPending.get(pos.symbol);
+    if (existing) {
+      existing.reasons.add(reason);
+    } else {
+      this.protectionAlertPending.set(pos.symbol, {
+        prevSl: prevSl ?? null,
+        prevTp: prevTp ?? null,
+        reasons: new Set([reason]),
+      });
+    }
+
+    if (!this.protectionAlertTimer) {
+      this.protectionAlertTimer = setTimeout(() => this.flushProtectionAlerts(), 6_000);
+      this.protectionAlertTimer.unref?.();
+    }
+  }
+
+  private flushProtectionAlerts(): void {
+    this.protectionAlertTimer = null;
+    const pending = this.protectionAlertPending;
+    this.protectionAlertPending = new Map();
+    if (pending.size === 0) return;
+
+    for (const [symbol, info] of pending.entries()) {
+      const pos = this.activePositions.find((p) => p.symbol === symbol);
+      if (!pos) continue; // closed before the window elapsed — the close message covers it
+
+      const slChanged = Math.abs((pos.stopLossPrice ?? 0) - (info.prevSl ?? 0)) > 1e-9;
+      const tpChanged = Math.abs((pos.takeProfitPrice ?? 0) - (info.prevTp ?? 0)) > 1e-9;
+      if (!slChanged && !tpChanged) continue; // reverted / superseded
+
+      this.enqueueTelegram(
+        this.formatProtectionChange(pos, info.prevSl, info.prevTp, Array.from(info.reasons)),
+        'PROTECTION'
+      );
+    }
+  }
+
+  private formatProtectionChange(
+    pos: ActivePosition,
+    prevSl: number | null,
+    prevTp: number | null,
+    reasons: string[]
+  ): string {
+    const esc = TradingEngine.escapeHtml;
+    const priceText = (v: number | null): string => (v && v > 0 ? `$${v.toFixed(2)}` : '未挂');
+    const formatLeg = (label: string, prev: number | null, next: number | null): string => {
+      const nextOk = next && next > 0;
+      if (Math.abs((next ?? 0) - (prev ?? 0)) <= 1e-9) {
+        return `${label}: ${priceText(next)}（未变）`;
+      }
+      const delta =
+        prev && prev > 0 && nextOk
+          ? ` (${next! >= prev ? '+' : ''}${(((next! - prev) / prev) * 100).toFixed(2)}%)`
+          : '';
+      const tag = !prev || prev <= 0 ? '（新挂）' : '';
+      return `${label}: ${priceText(prev)} → <b>${priceText(next)}</b>${delta}${tag}`;
+    };
+
+    const lines = [
+      `🛡️ <b>止盈止损调整</b> <code>${esc(pos.symbol)}</code>`,
+      `方向: ${pos.side === 'LONG' ? '做多 LONG 📈' : '做空 SHORT 📉'} | 周期 ${esc(pos.interval)}`,
+      formatLeg('止损', prevSl, pos.stopLossPrice),
+      formatLeg('止盈', prevTp, pos.takeProfitPrice),
+      `现价: $${pos.currentPrice} | 浮盈 ${pos.unrealizedPnl >= 0 ? '+' : ''}$${pos.unrealizedPnl.toFixed(
+        2
+      )} (${pos.unrealizedPnlPercent >= 0 ? '+' : ''}${pos.unrealizedPnlPercent.toFixed(2)}%)`,
+      `原因: ${esc(reasons.join(' · '))}`,
+      `⏰ ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai', hour12: false })}`,
+    ];
+    return lines.join('\n');
+  }
+
   public async sendEmergencyNotification(title: string, message: string): Promise<boolean> {
     const notif = this.riskConfig.notification;
     if (!notif || !notif.enableEmergencyAlerts) return false;
@@ -3235,23 +3704,13 @@ class TradingEngine {
     let sentCount = 0;
     const fullText = `🚨 [AI 量化熔断紧急预警中枢 - ${title}]\n\n${message}\n\n⏰ 发生时间: ${new Date().toLocaleString('zh-CN', { timeZone: 'Asia/Shanghai' })}`;
 
-    if (notif.telegramBotToken && notif.telegramChatId) {
-      try {
-        const tgUrl = `https://api.telegram.org/bot${notif.telegramBotToken}/sendMessage`;
-        const res = await fetch(tgUrl, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            chat_id: notif.telegramChatId,
-            text: fullText,
-          }),
-        });
-        if (res.ok) {
-          sentCount++;
-          this.addLog('success', 'API', `📱 【Telegram 熔断紧急预警中枢成功推送】: 已发往 Chat ID ${notif.telegramChatId}`);
-        }
-      } catch (err: any) {
-        this.addLog('warn', 'API', `Telegram 预警推送异常: ${err.message}`);
+    if (notif.telegramEnabled !== false && notif.telegramBotToken && notif.telegramChatId) {
+      const result = await this.postTelegram(fullText);
+      if (result.ok) {
+        sentCount++;
+        this.addLog('success', 'API', `📱 【Telegram 熔断紧急预警中枢成功推送】: 已发往 Chat ID ${this.maskSecret(notif.telegramChatId)}`);
+      } else {
+        this.addLog('warn', 'API', `Telegram 预警推送异常: ${this.describeTelegramError(result)}`);
       }
     }
 
@@ -3265,7 +3724,14 @@ class TradingEngine {
             title,
             message,
             timestamp: now,
-            status: this.getStatus(),
+            // Do not ship the whole status (it contains balances & positions) to an external URL.
+            riskMetrics: this.getRiskMetrics(),
+            activePositions: this.activePositions.map((p) => ({
+              symbol: p.symbol,
+              side: p.side,
+              entryPrice: p.entryPrice,
+              unrealizedPnl: p.unrealizedPnl,
+            })),
           }),
         });
         if (res.ok) {
@@ -3518,6 +3984,8 @@ class TradingEngine {
 
                 const gainPercent = (pos.unrealizedPnl / pos.marginUsed) * 100;
                 if (gainPercent >= dynamicBreakevenPercent || pos.peakPnlUsdt >= dynamicBreakevenUsdt) {
+                  const prevSl = pos.stopLossPrice;
+                  const prevTp = pos.takeProfitPrice;
                   const safeCostLong = pos.entryPrice * 1.0015;
                   const safeCostShort = pos.entryPrice * 0.9985;
                   // Only ratchet to breakeven while price is still on the profitable side.
@@ -3558,6 +4026,7 @@ class TradingEngine {
                         await this.cancelBinanceOrder(symbol, oldId);
                       }
                       this.addLog('info', 'API', `⚡ [币安交易所自动保本挂单更新成功] 挂单价: $${pos.stopLossPrice.toFixed(2)} (单号 #${newSl.orderId})`, symbol);
+                      this.queueProtectionChange(pos, prevSl, prevTp, '自动保本上移');
                     }
                   }
                 }
@@ -3716,6 +4185,36 @@ class TradingEngine {
                 this.activePositions.some((p) => p.symbol === symbol)
               ) {
                 continue;
+              }
+
+              // One symbol = at most ONE position at a time (guard above), plus:
+              //  - a post-close cool-down, so a stop-out cannot be re-entered on the very next
+              //    scan by the same still-valid signal (this was the 10s open→close churn);
+              //  - one entry per candle, so a signal that flickers inside one bar cannot stack.
+              const cooldownUntil = this.symbolCooldownUntil.get(symbol) ?? 0;
+              if (Date.now() < cooldownUntil) {
+                const lastLog = this.lastCooldownLogAt.get(symbol) ?? 0;
+                if (Date.now() - lastLog > 120_000) {
+                  this.lastCooldownLogAt.set(symbol, Date.now());
+                  this.addLog(
+                    'info',
+                    'SIGNAL',
+                    `🧊 [${symbol}] 平仓冷却中（剩余 ${Math.max(
+                      1,
+                      Math.ceil((cooldownUntil - Date.now()) / 60000)
+                    )} 分钟），本周期信号不开新仓`,
+                    symbol
+                  );
+                }
+                continue;
+              }
+              const lastEntryBar = this.lastEntryBarTime.get(symbol);
+              if (
+                lastEntryBar &&
+                lastEntryBar.interval === interval &&
+                lastEntryBar.barTime === latestBar.timestamp
+              ) {
+                continue; // 同一根 K 线只允许开一次仓
               }
 
               // Portfolio max drawdown kill-switch (hard block new openings when equity drawdown breaches limit)
@@ -4160,6 +4659,10 @@ class TradingEngine {
                 };
 
                 this.activePositions.push(newPosition);
+                // Remember which candle produced this entry and clear any stale cool-down.
+                this.lastEntryBarTime.set(symbol, { interval, barTime: latestBar.timestamp });
+                this.symbolCooldownUntil.delete(symbol);
+                this.notifyTradeOpen(newPosition);
 
                 if (hasKeys) {
                   await this.syncLiveAccountNow(false);
@@ -4642,6 +5145,7 @@ class TradingEngine {
     if (isLive && !record) {
       this.activePositions = this.activePositions.filter((p) => p.id !== pos.id);
       this.clearCloseFailure(pos.symbol);
+      this.startSymbolCooldown(pos.symbol);
       this.addLog(
         'warn',
         'ORDER',
@@ -4706,7 +5210,9 @@ class TradingEngine {
     }
     this.activePositions = this.activePositions.filter((p) => p.id !== pos.id);
     if (isLive) this.clearCloseFailure(pos.symbol);
+    this.startSymbolCooldown(pos.symbol);
     this.updatePatternLearning(record);
+    this.notifyTradeClose(record, pos);
 
     if (isLive) {
       // Refresh equity from the exchange AFTER the local record is gone, so the sync cannot

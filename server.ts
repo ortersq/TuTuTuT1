@@ -195,6 +195,44 @@ app.post('/api/bot/config', requireAuth, (req, res) => {
   res.json({ success: true, message: '配置已更新', status: botEngine.getStatus() });
 });
 
+// Protected Telegram / Webhook Notification Configuration (saved to .env, secret stays server-side)
+app.post('/api/bot/notification-config', requireAuth, (req, res) => {
+  const body = req.body || {};
+  const result = botEngine.setNotificationConfig({
+    telegramEnabled:
+      typeof body.telegramEnabled === 'boolean' ? body.telegramEnabled : undefined,
+    telegramBotToken:
+      typeof body.telegramBotToken === 'string' ? body.telegramBotToken : undefined,
+    telegramChatId:
+      typeof body.telegramChatId === 'string' ? body.telegramChatId : undefined,
+    tradeAlertsEnabled:
+      typeof body.tradeAlertsEnabled === 'boolean' ? body.tradeAlertsEnabled : undefined,
+    protectionAlertsEnabled:
+      typeof body.protectionAlertsEnabled === 'boolean'
+        ? body.protectionAlertsEnabled
+        : undefined,
+    enableEmergencyAlerts:
+      typeof body.enableEmergencyAlerts === 'boolean' ? body.enableEmergencyAlerts : undefined,
+    webhookUrl: typeof body.webhookUrl === 'string' ? body.webhookUrl : undefined,
+  });
+  return res.json({
+    success: result.success,
+    message: result.message,
+    notification: result.notification,
+    status: botEngine.getStatus(),
+  });
+});
+
+// Protected Telegram test message (bypasses the queue, returns an actionable error hint)
+app.post('/api/bot/telegram-test', requireAuth, async (_req, res) => {
+  const result = await botEngine.sendTelegramTest();
+  return res.json({
+    success: result.success,
+    message: result.message,
+    status: botEngine.getStatus(),
+  });
+});
+
 // Protected Test Emergency Notification Route
 app.post('/api/bot/test-notification', requireAuth, async (req, res) => {
   const sent = await botEngine.sendEmergencyNotification(

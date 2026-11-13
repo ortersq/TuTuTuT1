@@ -18,6 +18,8 @@ import {
   Layers,
   Lock,
   KeyRound,
+  Send,
+  BookOpen,
 } from 'lucide-react';
 import { LOCKED_TARGET_SYMBOLS } from '../utils/riskAndExecution';
 
@@ -32,6 +34,15 @@ interface SettingsPanelProps {
     leverage?: number;
     riskConfig?: any;
   }) => void;
+  onSaveNotificationConfig?: (patch: {
+    telegramEnabled?: boolean;
+    telegramBotToken?: string;
+    telegramChatId?: string;
+    tradeAlertsEnabled?: boolean;
+    protectionAlertsEnabled?: boolean;
+    enableEmergencyAlerts?: boolean;
+  }) => Promise<{ success: boolean; message: string }>;
+  onTestTelegram?: () => Promise<{ success: boolean; message: string }>;
 }
 
 export const SettingsPanel: React.FC<SettingsPanelProps> = ({
@@ -40,6 +51,8 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
   onRemoveSymbol,
   onSaveCredentials,
   onUpdateConfig,
+  onSaveNotificationConfig,
+  onTestTelegram,
 }) => {
   // Credentials state
   const [apiKey, setApiKey] = useState<string>('');
@@ -106,6 +119,79 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
     currentBasket?.cooldownMinutes ?? 20
   );
   const [basketSavedSuccess, setBasketSavedSuccess] = useState<boolean>(false);
+
+  // Telegram 通知配置状态
+  const currentNotification = status?.notificationStatus;
+  const [tgEnabled, setTgEnabled] = useState<boolean>(currentNotification?.telegramEnabled ?? true);
+  const [tgTrade, setTgTrade] = useState<boolean>(currentNotification?.tradeAlertsEnabled ?? true);
+  const [tgProtection, setTgProtection] = useState<boolean>(
+    currentNotification?.protectionAlertsEnabled ?? true
+  );
+  const [tgEmergency, setTgEmergency] = useState<boolean>(
+    currentNotification?.emergencyAlertsEnabled ?? true
+  );
+  const [tgChatId, setTgChatId] = useState<string>(currentNotification?.chatId || '');
+  const [tgToken, setTgToken] = useState<string>('');
+  const [tgSaving, setTgSaving] = useState<boolean>(false);
+  const [tgTesting, setTgTesting] = useState<boolean>(false);
+  const [tgMsg, setTgMsg] = useState<{ success: boolean; text: string } | null>(null);
+
+  useEffect(() => {
+    if (!status?.notificationStatus) return;
+    setTgEnabled(status.notificationStatus.telegramEnabled);
+    setTgTrade(status.notificationStatus.tradeAlertsEnabled);
+    setTgProtection(status.notificationStatus.protectionAlertsEnabled);
+    setTgEmergency(status.notificationStatus.emergencyAlertsEnabled);
+    setTgChatId(status.notificationStatus.chatId || '');
+  }, [
+    status?.notificationStatus?.telegramEnabled,
+    status?.notificationStatus?.tradeAlertsEnabled,
+    status?.notificationStatus?.protectionAlertsEnabled,
+    status?.notificationStatus?.emergencyAlertsEnabled,
+    status?.notificationStatus?.chatId,
+  ]);
+
+  const handleSaveTelegram = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!onSaveNotificationConfig) return;
+    setTgSaving(true);
+    setTgMsg(null);
+    try {
+      const patch: {
+        telegramEnabled: boolean;
+        tradeAlertsEnabled: boolean;
+        protectionAlertsEnabled: boolean;
+        enableEmergencyAlerts: boolean;
+        telegramChatId: string;
+        telegramBotToken?: string;
+      } = {
+        telegramEnabled: tgEnabled,
+        tradeAlertsEnabled: tgTrade,
+        protectionAlertsEnabled: tgProtection,
+        enableEmergencyAlerts: tgEmergency,
+        telegramChatId: tgChatId.trim(),
+      };
+      // Blank token = keep the existing one (the server masks it, the browser never sees it).
+      if (tgToken.trim()) patch.telegramBotToken = tgToken.trim();
+      const res = await onSaveNotificationConfig(patch);
+      setTgMsg({ success: res.success, text: res.message });
+      if (res.success) setTgToken('');
+    } finally {
+      setTgSaving(false);
+    }
+  };
+
+  const handleTestTelegram = async () => {
+    if (!onTestTelegram) return;
+    setTgTesting(true);
+    setTgMsg(null);
+    try {
+      const res = await onTestTelegram();
+      setTgMsg({ success: res.success, text: res.message });
+    } finally {
+      setTgTesting(false);
+    }
+  };
 
   // Sync state if status updates
   useEffect(() => {
@@ -835,6 +921,247 @@ export const SettingsPanel: React.FC<SettingsPanelProps> = ({
             )}
           </div>
         </form>
+      </div>
+
+      {/* 3.1 Telegram 交易通知（开平仓推送 + 关键配置教程） */}
+      <div className="bg-[#111726] border border-sky-500/30 rounded-2xl p-5 space-y-4">
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-800 pb-3">
+          <div className="flex items-center gap-3">
+            <div className="w-9 h-9 rounded-xl bg-sky-500/10 border border-sky-500/30 flex items-center justify-center text-sky-400">
+              <Send className="w-5 h-5" />
+            </div>
+            <div>
+              <h3 className="text-base font-bold text-slate-100">Telegram 交易通知</h3>
+              <p className="text-xs text-slate-400 mt-0.5">
+                开仓 / 平仓成交、止盈止损变动实时推到手机；另可接收熔断与同步异常预警。配置写入服务器 <code>.env</code>，重启不丢。
+              </p>
+            </div>
+          </div>
+          <span
+            className={`px-2.5 py-1 rounded text-xs font-semibold border ${
+              currentNotification?.telegramConfigured
+                ? tgEnabled
+                  ? 'bg-emerald-500/20 text-emerald-300 border-emerald-500/40'
+                  : 'bg-amber-500/20 text-amber-300 border-amber-500/40'
+                : 'bg-slate-700/40 text-slate-300 border-slate-600/60'
+            }`}
+          >
+            {currentNotification?.telegramConfigured
+              ? tgEnabled
+                ? '🟢 已启用'
+                : '🟡 已配置 · 已暂停'
+              : '⚪ 未配置'}
+          </span>
+        </div>
+
+        {/* 开关组 */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-2.5">
+          <button
+            type="button"
+            onClick={() => setTgEnabled((v) => !v)}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+              tgEnabled
+                ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+          >
+            {tgEnabled ? '✓ 总开关：已开启' : '✕ 总开关：已关闭'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTgTrade((v) => !v)}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+              tgTrade
+                ? 'bg-sky-500/15 border-sky-500/40 text-sky-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+          >
+            {tgTrade ? '✓ 开平仓推送：开' : '✕ 开平仓推送：关'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTgProtection((v) => !v)}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+              tgProtection
+                ? 'bg-indigo-500/15 border-indigo-500/40 text-indigo-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+          >
+            {tgProtection ? '✓ 止盈止损变动：开' : '✕ 止盈止损变动：关'}
+          </button>
+          <button
+            type="button"
+            onClick={() => setTgEmergency((v) => !v)}
+            className={`px-3 py-2 rounded-xl text-xs font-semibold border transition-colors cursor-pointer ${
+              tgEmergency
+                ? 'bg-rose-500/15 border-rose-500/40 text-rose-300'
+                : 'bg-slate-800 border-slate-700 text-slate-400'
+            }`}
+          >
+            {tgEmergency ? '✓ 紧急风控预警：开' : '✕ 紧急风控预警：关'}
+          </button>
+        </div>
+
+        <form onSubmit={handleSaveTelegram} className="space-y-3">
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-300">Bot Token（@BotFather 生成）:</label>
+            <input
+              type="password"
+              value={tgToken}
+              onChange={(e) => setTgToken(e.target.value)}
+              placeholder={
+                currentNotification?.telegramConfigured
+                  ? `${currentNotification.botTokenHint}（已配置，留空则保持不变）`
+                  : '例如 123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxx'
+              }
+              className="w-full px-4 py-2.5 bg-[#0b0e14] border border-slate-800 rounded-xl text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-sky-400 font-mono"
+            />
+          </div>
+
+          <div className="space-y-1">
+            <label className="text-xs font-semibold text-slate-300">Chat ID（个人 / 群组 / 频道）:</label>
+            <input
+              type="text"
+              value={tgChatId}
+              onChange={(e) => setTgChatId(e.target.value)}
+              placeholder="个人填 123456789；群组/频道填 -1001234567890"
+              className="w-full px-4 py-2.5 bg-[#0b0e14] border border-slate-800 rounded-xl text-xs text-slate-100 placeholder:text-slate-600 focus:outline-none focus:border-sky-400 font-mono"
+            />
+          </div>
+
+          {tgMsg && (
+            <div
+              className={`p-3 rounded-xl text-xs font-medium border ${
+                tgMsg.success
+                  ? 'bg-emerald-500/10 border-emerald-500/40 text-emerald-300'
+                  : 'bg-rose-500/10 border-rose-500/40 text-rose-300'
+              }`}
+            >
+              {tgMsg.text}
+            </div>
+          )}
+
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={tgSaving || !onSaveNotificationConfig}
+              className="px-5 py-2 bg-sky-400 hover:bg-sky-300 disabled:bg-slate-800 disabled:text-slate-500 text-slate-950 font-bold text-xs rounded-xl transition-colors cursor-pointer shadow-sm"
+            >
+              {tgSaving ? '保存中...' : '保存 Telegram 配置'}
+            </button>
+            <button
+              type="button"
+              onClick={handleTestTelegram}
+              disabled={tgTesting || !onTestTelegram}
+              className="px-5 py-2 bg-slate-800 hover:bg-slate-700 disabled:opacity-50 text-slate-200 font-semibold text-xs rounded-xl transition-colors cursor-pointer border border-slate-700"
+            >
+              {tgTesting ? '发送中...' : '📨 发送测试消息'}
+            </button>
+            <span className="text-[11px] text-slate-500">
+              提示：先保存再测试；测试走单条即时发送，交易推送走 1.1 秒间隔队列防限流。
+            </span>
+          </div>
+        </form>
+
+        {/* 配置教程 */}
+        <details className="bg-[#0b0e14] border border-slate-800 rounded-xl group">
+          <summary className="cursor-pointer list-none px-4 py-3 text-xs font-semibold text-slate-200 flex items-center justify-between">
+            <span className="flex items-center gap-2">
+              <BookOpen className="w-4 h-4 text-sky-400" />
+              📖 3 分钟配置教程（含常见报错对照表）
+            </span>
+            <span className="text-slate-500 text-[11px] group-open:hidden">点击展开</span>
+          </summary>
+
+          <div className="px-4 pb-4 space-y-3 text-[11px] leading-relaxed text-slate-300">
+            <div className="space-y-1.5">
+              <div className="font-semibold text-slate-200">第 1 步：创建 Bot，拿到 Token</div>
+              <div>
+                ① Telegram 搜索 <code className="text-sky-300">@BotFather</code> → 发送{' '}
+                <code className="text-sky-300">/newbot</code> → 按提示起名（必须以 <code>bot</code> 结尾）。
+              </div>
+              <div>
+                ② 创建成功后会返回一串{' '}
+                <code className="text-amber-300 font-mono">123456789:AAHxxxxxxxxxxxxxxxxxxxxxxxxxxx</code>
+                ，这就是 <b>Bot Token</b>，直接粘到上面第一个输入框。
+              </div>
+              <div className="text-amber-300/90">
+                ③ 立刻在 Telegram 里打开你这个 Bot，点「开始 / START」发一条任意消息。否则 Bot 无权主动给你发消息（会报
+                chat not found）。
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="font-semibold text-slate-200">第 2 步：拿到 Chat ID</div>
+              <div>
+                • <b>个人</b>：搜索 <code className="text-sky-300">@userinfobot</code> → 发{' '}
+                <code>/start</code> → 它返回的 <code>Id: 123456789</code> 就是 Chat ID。
+              </div>
+              <div>
+                • <b>群组</b>：把 Bot 拉进群并给发言权限 → 在群里发一条消息 → 浏览器打开{' '}
+                <code className="text-slate-200 break-all">
+                  https://api.telegram.org/bot&lt;你的TOKEN&gt;/getUpdates
+                </code>{' '}
+                → 找 <code>&quot;chat&quot;:{`{`}&quot;id&quot;:-1001234567890{`}`}</code>，群组 ID 是<b>负数</b>。
+              </div>
+              <div>
+                • <b>频道</b>：把 Bot 设为管理员 → Chat ID 形如 <code>-100...</code>，或直接填{' '}
+                <code>@频道名</code>。
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="font-semibold text-slate-200">第 3 步：保存并测试</div>
+              <div>填好两项 → 点「保存 Telegram 配置」→ 点「发送测试消息」→ 手机收到即完成。</div>
+              <div>
+                之后每次<b>开仓 / 平仓</b>都会收到成交明细；<b>止盈止损被调整</b>（自动保本上移、移动止损棘轮、交易所补挂）会单独推一条变更通知，同一仓位 6 秒内的多次变动会合并成一条。
+              </div>
+            </div>
+
+            <div className="space-y-1.5">
+              <div className="font-semibold text-slate-200">常见报错对照表</div>
+              <div className="overflow-x-auto">
+                <table className="w-full text-[11px] border border-slate-800 rounded-lg overflow-hidden">
+                  <thead className="bg-slate-900/80 text-slate-300">
+                    <tr>
+                      <th className="text-left px-2 py-1.5 font-semibold">报错</th>
+                      <th className="text-left px-2 py-1.5 font-semibold">原因</th>
+                      <th className="text-left px-2 py-1.5 font-semibold">处理</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-800/80">
+                    <tr>
+                      <td className="px-2 py-1.5 font-mono text-rose-300">401 Unauthorized</td>
+                      <td className="px-2 py-1.5">Token 错 / 已被 revoke / 前后有空格</td>
+                      <td className="px-2 py-1.5">回 @BotFather 用 <code>/token</code> 重新生成</td>
+                    </tr>
+                    <tr>
+                      <td className="px-2 py-1.5 font-mono text-rose-300">400 chat not found</td>
+                      <td className="px-2 py-1.5">Chat ID 错、没先给 Bot 发消息、Bot 不在群里</td>
+                      <td className="px-2 py-1.5">先发 <code>/start</code> 或把 Bot 拉进群</td>
+                    </tr>
+                    <tr>
+                      <td className="px-2 py-1.5 font-mono text-rose-300">403 Forbidden</td>
+                      <td className="px-2 py-1.5">你拉黑了 Bot / 群里没有发言权限</td>
+                      <td className="px-2 py-1.5">解除拉黑、给 Bot 管理员权限</td>
+                    </tr>
+                    <tr>
+                      <td className="px-2 py-1.5 font-mono text-amber-300">429 Too Many Requests</td>
+                      <td className="px-2 py-1.5">发送太频繁</td>
+                      <td className="px-2 py-1.5">等 30 秒；程序已做 1.1 秒队列间隔</td>
+                    </tr>
+                  </tbody>
+                </table>
+              </div>
+            </div>
+
+            <div className="p-2.5 bg-slate-900/60 border border-slate-800 rounded-lg text-slate-400">
+              <b className="text-slate-300">🔐 安全提示：</b> Bot Token 等同于密码。系统在接口返回里只会回传打码后的{' '}
+              <code>{currentNotification?.botTokenHint || '1234••••abcd'}</code>，明文只存在服务器{' '}
+              <code>.env</code> 里；不要把 Token 截图发到公开群，也不要提交到 Git 仓库。
+            </div>
+          </div>
+        </details>
       </div>
 
       {/* 3.1 控制台登录密码设置 (支持 Web 界面修改与 .env 双向同步，即改即生效) */}

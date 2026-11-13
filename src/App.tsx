@@ -303,6 +303,58 @@ export default function App() {
     }
   };
 
+  const handleSaveNotificationConfig = async (patch: {
+    telegramEnabled?: boolean;
+    telegramBotToken?: string;
+    telegramChatId?: string;
+    tradeAlertsEnabled?: boolean;
+    protectionAlertsEnabled?: boolean;
+    enableEmergencyAlerts?: boolean;
+  }): Promise<{ success: boolean; message: string }> => {
+    const token = authToken || localStorage.getItem('quant_auth_token');
+    if (!token) return { success: false, message: '登录凭证已失效，请重新登录' };
+    try {
+      const seq = ++requestSeqRef.current;
+      const res = await fetch('/api/bot/notification-config', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(patch),
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.status) applyStatusSafely(data.status, seq);
+      else await fetchStatus();
+      return {
+        success: Boolean(res.ok && data?.success),
+        message: data?.message || (res.ok ? '已保存' : '保存失败'),
+      };
+    } catch {
+      return { success: false, message: '网络异常，保存失败' };
+    }
+  };
+
+  const handleTestTelegram = async (): Promise<{ success: boolean; message: string }> => {
+    const token = authToken || localStorage.getItem('quant_auth_token');
+    if (!token) return { success: false, message: '登录凭证已失效，请重新登录' };
+    try {
+      const seq = ++requestSeqRef.current;
+      const res = await fetch('/api/bot/telegram-test', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const data = await res.json().catch(() => ({}));
+      if (data?.status) applyStatusSafely(data.status, seq);
+      return {
+        success: Boolean(res.ok && data?.success),
+        message: data?.message || (res.ok ? '已发送' : '发送失败'),
+      };
+    } catch {
+      return { success: false, message: '网络异常，发送失败' };
+    }
+  };
+
   const handleSyncLiveAccount = async () => {
     const token = authToken || localStorage.getItem('quant_auth_token');
     if (!token) return;
@@ -480,6 +532,8 @@ export default function App() {
             onRemoveSymbol={handleRemoveSymbol}
             onSaveCredentials={handleSaveCredentials}
             onUpdateConfig={handleUpdateConfig}
+            onSaveNotificationConfig={handleSaveNotificationConfig}
+            onTestTelegram={handleTestTelegram}
           />
         )}
       </main>
