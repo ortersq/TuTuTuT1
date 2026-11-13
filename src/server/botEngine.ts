@@ -1406,6 +1406,17 @@ class TradingEngine {
         return { orderId: String(data3.algoId || data3.clientAlgoId) };
       }
 
+      const isAlreadyExists = data1?.code === -4120 || data3?.code === -4120;
+      if (isAlreadyExists) {
+        this.addLog(
+          'info',
+          'API',
+          `ℹ️ [${symbol}] 交易所已有同向止损/止盈单挂单，跳过重复挂载 (${type} @ $${priceStr})`,
+          symbol
+        );
+        return null;
+      }
+
       this.addLog(
         'error',
         'API',
